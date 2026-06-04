@@ -21,7 +21,8 @@ export function TabView({ tabId }: Props): React.ReactElement | null {
     <section className="flex h-full flex-col">
       {tab.status === 'reconnecting' ? (
         <div className="flex-none border-b border-blue-500/40 bg-blue-500/10 px-4 py-1 text-xs text-blue-600 dark:text-blue-300">
-          Reconnecting to daemon…
+          <span className="inline-block animate-pulse">●</span> Reconnecting to daemon…
+          {tab.error ? <span className="ml-2 opacity-60">({tab.error})</span> : null}
         </div>
       ) : tab.status === 'error' ? (
         <div className="flex-none border-b border-destructive/40 bg-destructive/10 px-4 py-1 text-xs text-destructive">

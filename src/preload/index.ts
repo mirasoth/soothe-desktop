@@ -11,12 +11,14 @@ import {
   type TabStatusEvent,
   type SkillsListRequest,
   type LoopsDeleteRequest,
+  type LoopsMessagesRequest,
 } from '../shared/ipc.js';
 
 const bridge: SootheBridge = {
   daemonHealth: () => ipcRenderer.invoke(Channels.DaemonHealth),
   loopsList: () => ipcRenderer.invoke(Channels.LoopsList),
   loopsDelete: (req: LoopsDeleteRequest) => ipcRenderer.invoke(Channels.LoopsDelete, req),
+  loopsMessages: (req: LoopsMessagesRequest) => ipcRenderer.invoke(Channels.LoopsMessages, req),
   skillsList: (req: SkillsListRequest) => ipcRenderer.invoke(Channels.SkillsList, req),
   tabOpen: (req: TabOpenRequest) => ipcRenderer.invoke(Channels.TabOpen, req),
   tabInput: (req: TabInputRequest) => ipcRenderer.invoke(Channels.TabInput, req),

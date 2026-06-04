@@ -69,4 +69,37 @@ describe('sidebar visibleLoops', () => {
     );
     expect(out.map(l => l.loop_id)).toEqual(['new', 'mid', 'old']);
   });
+
+  it('hides loops with threads=0 (empty since creation) when enrichment marks them false', () => {
+    // The main-side enricher short-circuits threads === 0 → hasUserMessage:false
+    // without making a loop_messages RPC. Verify the sidebar filter respects it.
+    const out = visibleLoops(
+      [
+        { loop_id: 'never-used', threads: 0, hasUserMessage: false },
+        { loop_id: 'used', threads: 1, hasUserMessage: true, title: 'hello' },
+      ],
+      new Set(),
+    );
+    expect(out.map(l => l.loop_id)).toEqual(['used']);
+  });
+});
+
+import { describe as describe2, expect as expect2, it as it2 } from 'vitest';
+
+/** Mirror the main-process enricher's threads-aware short-circuit. */
+function enrichmentVerdict(loop: { threads?: number }): 'skip-false' | 'rpc-needed' {
+  const threads = typeof loop.threads === 'number' ? loop.threads : 0;
+  return threads === 0 ? 'skip-false' : 'rpc-needed';
+}
+
+describe2('loops enrichment short-circuit', () => {
+  it2('skips loop_messages RPC for threads=0 loops', () => {
+    expect2(enrichmentVerdict({ threads: 0 })).toBe('skip-false');
+    expect2(enrichmentVerdict({})).toBe('skip-false');
+  });
+
+  it2('makes the RPC for threads>0 loops', () => {
+    expect2(enrichmentVerdict({ threads: 1 })).toBe('rpc-needed');
+    expect2(enrichmentVerdict({ threads: 5 })).toBe('rpc-needed');
+  });
 });

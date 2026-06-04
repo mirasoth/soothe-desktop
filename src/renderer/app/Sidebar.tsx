@@ -4,7 +4,7 @@ import { useStore, makeTab } from '../state/store.js';
 import type { LoopSummary } from '@shared/ipc';
 import { Button } from '../ui/button.js';
 import { BrandMark } from '../ui/brand.js';
-import { cn, formatTimestamp, truncate } from '../lib/utils.js';
+import { cn, formatTimestamp, simpleLoopStatus, truncate } from '../lib/utils.js';
 
 function tsValue(value: string | number | null | undefined): number {
   if (value === null || value === undefined) return 0;
@@ -13,15 +13,12 @@ function tsValue(value: string | number | null | undefined): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
-function loopSortKey(loop: { last_message_at?: string | number | null; created?: unknown }): number {
+function loopSortKey(loop: LoopSummary): number {
   const last = tsValue(loop.last_message_at);
   if (last > 0) return last;
   // daemon's loop_list returns `created` (a string like "2026-06-04T14:23") when
   // last_message_at is not surfaced. Fall back to that.
-  const created = typeof loop.created === 'string' || typeof loop.created === 'number'
-    ? tsValue(loop.created as string | number)
-    : 0;
-  return created;
+  return tsValue(loop.created ?? null);
 }
 
 interface SidebarProps {
@@ -46,11 +43,12 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
   const visibleLoops = useMemo(() => {
     return loops
       .filter(loop => {
-        // Hide loops with no human messages. Keep loops that are currently open
-        // in a tab (the user may be drafting a first message) and loops where
-        // we couldn't determine status (treat as visible to be safe).
+        // Strict filter: a loop must have at least one confirmed user message.
+        // Keep loops currently open in a tab (the user may be drafting the
+        // first message, so the loop is empty server-side but conceptually
+        // "active" for them).
         if (tabs.some(t => t.loopId === loop.loop_id)) return true;
-        return loop.hasUserMessage !== false;
+        return loop.hasUserMessage === true;
       })
       .sort((a, b) => loopSortKey(b) - loopSortKey(a));
   }, [loops, tabs]);
@@ -115,6 +113,7 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
         setLoopsError(resp.error ?? 'Failed to open loop');
         return;
       }
+      // Tab title: keep the first user message (chat topic), fallback to id.
       addTab(
         makeTab({
           tabId: resp.tabId,
@@ -122,8 +121,35 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
           title: loop.title ? truncate(loop.title, 32) : truncate(loop.loop_id, 24),
         }),
       );
+      // Load persisted history alongside the live subscription. We don't depend
+      // on the daemon's history_replay frames timing — explicit fetch is
+      // race-free and gives a consistent transcript.
+      void loadHistoryInto(resp.tabId, loop.loop_id);
     } finally {
       setBusy(false);
+    }
+  };
+
+  const loadHistoryInto = async (tabId: string, loopId: string): Promise<void> => {
+    try {
+      const resp = await soothe().loopsMessages({ loopId, limit: 500 });
+      if (resp.error || resp.messages.length === 0) return;
+      const state = useStore.getState();
+      // Seed events in chronological order. Skip system rows and tool kinds —
+      // those are best surfaced via live tool cards once a new turn happens.
+      for (const row of resp.messages) {
+        if (row.kind !== 'conversation') continue;
+        if (row.role !== 'user' && row.role !== 'assistant') continue;
+        const text = row.content?.trim();
+        if (!text) continue;
+        state.appendTabEvent(tabId, {
+          type: row.role === 'user' ? 'human' : 'ai',
+          content: text,
+          historical: true,
+        });
+      }
+    } catch {
+      // best-effort; live stream may still backfill via history_replay
     }
   };
 
@@ -165,13 +191,18 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
             {visibleLoops.map(loop => {
               const open = tabs.find(t => t.loopId === loop.loop_id);
               const isActive = open?.tabId === activeTabId;
-              const displayTitle = loop.title?.trim() || loop.loop_id.slice(0, 8);
+              const headline =
+                loop.latestPreview?.trim() ||
+                loop.title?.trim() ||
+                loop.loop_id.slice(0, 8);
+              const status = simpleLoopStatus(loop.status);
+              const stamp = formatTimestamp(loop.last_message_at ?? loop.created ?? null);
               return (
                 <li key={loop.loop_id}>
                   <div
                     className={cn(
-                      'group flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-accent',
-                      isActive ? 'bg-accent' : '',
+                      'group flex cursor-pointer items-center gap-2 rounded px-2 py-1.5 text-xs transition-colors hover:bg-accent/60',
+                      isActive ? 'bg-accent border-l-2 border-primary pl-[6px] font-medium' : 'border-l-2 border-transparent',
                     )}
                     onClick={() => openLoop(loop)}
                     title={`${loop.loop_id}${loop.title ? `\n${loop.title}` : ''}`}
@@ -179,19 +210,15 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
                     <span
                       className={cn(
                         'h-1.5 w-1.5 flex-none rounded-full',
-                        loop.status === 'running' ? 'bg-emerald-500 animate-pulse' : 'bg-muted-foreground/50',
+                        status === 'running'
+                          ? 'bg-emerald-500 animate-pulse'
+                          : 'bg-muted-foreground/50',
                       )}
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate">{truncate(displayTitle, 40)}</div>
+                      <div className="truncate">{truncate(headline, 60)}</div>
                       <div className="truncate text-[10px] text-muted-foreground">
-                        {loop.status ?? 'idle'} ·{' '}
-                        {formatTimestamp(
-                          (loop.last_message_at as string | number | null | undefined) ??
-                            (typeof loop.created === 'string' || typeof loop.created === 'number'
-                              ? (loop.created as string | number)
-                              : null),
-                        )}
+                        {status} · {stamp}
                       </div>
                     </div>
                     <button

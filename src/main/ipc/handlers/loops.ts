@@ -2,10 +2,13 @@ import { ipcMain } from 'electron';
 import { Client } from '@mirasoth/soothe-client';
 import {
   Channels,
+  type LoopMessageRow,
   type LoopSummary,
   type LoopsDeleteRequest,
   type LoopsDeleteResponse,
   type LoopsListResponse,
+  type LoopsMessagesRequest,
+  type LoopsMessagesResponse,
 } from '@shared/ipc';
 import { getSettings } from '../../daemon/settings.js';
 
@@ -24,36 +27,88 @@ interface ThreadMessageLike {
   role?: 'user' | 'assistant' | 'system' | null;
   kind?: string;
   content?: string;
+  timestamp?: string | number;
 }
 
-function extractFirstUserPreview(messages: unknown): { title?: string; hasUserMessage: boolean } {
-  if (!Array.isArray(messages)) return { hasUserMessage: false };
+function previewText(text: string): string {
+  const trimmed = text.replace(/\s+/g, ' ').trim();
+  return trimmed.length > 80 ? `${trimmed.slice(0, 79)}…` : trimmed;
+}
+
+interface PreviewResult {
+  /** First user message — used by tab opener as the chat's stable title. */
+  title?: string;
+  /** Most recent conversational message (any role), prefixed You:/AI:. */
+  latestPreview?: string;
+  /** True iff at least one user-role message was found. */
+  hasUserMessage: boolean;
+  /** Timestamp of the last message (ISO string from daemon), if available. */
+  lastMessageAt?: string;
+}
+
+function extractPreviews(messages: unknown): PreviewResult {
+  if (!Array.isArray(messages) || messages.length === 0) {
+    return { hasUserMessage: false };
+  }
+  let firstUser: string | undefined;
+  let hasUser = false;
+  let latest: { role: string; text: string } | undefined;
+  let lastTs: string | undefined;
   for (const raw of messages) {
     if (!raw || typeof raw !== 'object') continue;
     const m = raw as ThreadMessageLike;
-    if (m.role !== 'user') continue;
+    const role = m.role ?? '';
     const text = typeof m.content === 'string' ? m.content.trim() : '';
-    if (!text) continue;
-    return { title: text, hasUserMessage: true };
+    if (role === 'user') hasUser = true;
+    if (role === 'user' && text && !firstUser) firstUser = text;
+    if ((role === 'user' || role === 'assistant') && text) {
+      latest = { role, text };
+    }
+    if (typeof m.timestamp === 'string') lastTs = m.timestamp;
+    else if (typeof m.timestamp === 'number') lastTs = new Date(m.timestamp * 1000).toISOString();
   }
-  return { hasUserMessage: false };
+  const latestPreview = latest
+    ? `${latest.role === 'user' ? 'You' : 'AI'}: ${previewText(latest.text)}`
+    : undefined;
+  return {
+    title: firstUser,
+    latestPreview,
+    hasUserMessage: hasUser,
+    lastMessageAt: lastTs,
+  };
 }
 
 const ENRICH_CONCURRENCY = 4;
 const ENRICH_TIMEOUT_MS = 15_000;
 
 async function enrichOne(client: Client, loop: LoopSummary): Promise<LoopSummary> {
+  // Loops with no bound thread (threads === 0) cannot have messages — calling
+  // loop_messages on them raises LOOP_CONTEXT on the daemon side. Skip the
+  // round-trip and mark as empty directly. This also cuts the call volume:
+  // brand-new "created" loops that the user never sent input to are very common
+  // and would otherwise show up in the sidebar as "unknown" placeholders.
+  const threads = typeof loop.threads === 'number' ? loop.threads : 0;
+  if (threads === 0) {
+    return { ...loop, hasUserMessage: false };
+  }
   try {
     const resp = (await client.requestResponse(
-      { type: 'loop_messages', loop_id: loop.loop_id, limit: 20 },
+      { type: 'loop_messages', loop_id: loop.loop_id, limit: 100 },
       'loop_messages_response',
       ENRICH_TIMEOUT_MS,
     )) as { messages?: unknown };
-    const { title, hasUserMessage } = extractFirstUserPreview(resp?.messages);
-    return { ...loop, title, hasUserMessage };
+    const { title, latestPreview, hasUserMessage, lastMessageAt } = extractPreviews(resp?.messages);
+    return {
+      ...loop,
+      title,
+      latestPreview,
+      hasUserMessage,
+      ...(lastMessageAt ? { last_message_at: lastMessageAt } : {}),
+    };
   } catch {
-    // Timeout / error — surface as "unknown" (undefined) so the sidebar shows
-    // the loop rather than hiding it.
+    // Timeout / error on a loop that DID have threads bound — we don't know
+    // whether it has user messages. Leave hasUserMessage undefined so the
+    // sidebar shows it (better to surface a possibly-real loop than hide it).
     return { ...loop };
   }
 }
@@ -96,6 +151,28 @@ export function registerLoopsHandlers(): void {
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         return { loopId: req.loopId, success: false, error: message };
+      }
+    },
+  );
+
+  ipcMain.handle(
+    Channels.LoopsMessages,
+    async (_evt, req: LoopsMessagesRequest): Promise<LoopsMessagesResponse> => {
+      try {
+        const limit = req.limit ?? 200;
+        const messages = await withEphemeralClient(async client => {
+          const resp = (await client.requestResponse(
+            { type: 'loop_messages', loop_id: req.loopId, limit },
+            'loop_messages_response',
+            ENRICH_TIMEOUT_MS,
+          )) as { messages?: unknown };
+          if (!Array.isArray(resp?.messages)) return [] as LoopMessageRow[];
+          return resp.messages as LoopMessageRow[];
+        });
+        return { loopId: req.loopId, messages };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { loopId: req.loopId, messages: [], error: message };
       }
     },
   );

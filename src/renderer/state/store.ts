@@ -49,6 +49,13 @@ export interface StoreState {
   loopsLoading: boolean;
   loopsError?: string;
   tabs: TabState[];
+  /**
+   * Buffer for events that arrive (via tab:event IPC) before the renderer has
+   * called addTab for the matching tabId. Drained into the tab's events array
+   * by addTab to fix the race where `loop_reattach` history_replay frames
+   * stream in before the tabOpen IPC response completes the renderer's addTab.
+   */
+  pendingEvents: Record<string, EventLogEntry[]>;
   activeTabId?: string;
   paletteOpen: boolean;
   settingsOpen: boolean;
@@ -88,6 +95,7 @@ export const useStore = create<StoreState>()(
     loops: [],
     loopsLoading: false,
     tabs: [],
+    pendingEvents: {},
     paletteOpen: false,
     settingsOpen: false,
     setDaemon: health => set({ daemon: health }),
@@ -96,10 +104,19 @@ export const useStore = create<StoreState>()(
     setLoopsError: error => set({ loopsError: error }),
     setLoopsLoading: loading => set({ loopsLoading: loading }),
     addTab: tab =>
-      set(state => ({
-        tabs: [...state.tabs, tab],
-        activeTabId: tab.tabId,
-      })),
+      set(state => {
+        // Drain any events that arrived for this tabId before addTab ran
+        // (history_replay race after loop_reattach).
+        const buffered = state.pendingEvents[tab.tabId] ?? [];
+        const seeded = buffered.length > 0 ? { ...tab, events: [...tab.events, ...buffered] } : tab;
+        const { [tab.tabId]: _drained, ...remaining } = state.pendingEvents;
+        void _drained;
+        return {
+          tabs: [...state.tabs, seeded],
+          activeTabId: tab.tabId,
+          pendingEvents: remaining,
+        };
+      }),
     removeTab: tabId =>
       set(state => {
         const tabs = state.tabs.filter(t => t.tabId !== tabId);
@@ -113,16 +130,19 @@ export const useStore = create<StoreState>()(
         tabs: state.tabs.map(t => (t.tabId === tabId ? { ...t, ...patch } : t)),
       })),
     appendTabEvent: (tabId, event) =>
-      set(state => ({
-        tabs: state.tabs.map(t =>
-          t.tabId === tabId
-            ? {
-                ...t,
-                events: [...t.events, { id: nextEventId(), event, receivedAt: Date.now() }],
-              }
-            : t,
-        ),
-      })),
+      set(state => {
+        const entry: EventLogEntry = { id: nextEventId(), event, receivedAt: Date.now() };
+        const tabIdx = state.tabs.findIndex(t => t.tabId === tabId);
+        if (tabIdx === -1) {
+          // Tab not registered yet — buffer the event so addTab can drain it.
+          const prev = state.pendingEvents[tabId] ?? [];
+          return { pendingEvents: { ...state.pendingEvents, [tabId]: [...prev, entry] } };
+        }
+        const tabs = state.tabs.slice();
+        const tab = tabs[tabIdx]!;
+        tabs[tabIdx] = { ...tab, events: [...tab.events, entry] };
+        return { tabs };
+      }),
     setDraft: (tabId, draft) =>
       set(state => ({
         tabs: state.tabs.map(t => (t.tabId === tabId ? { ...t, draft } : t)),

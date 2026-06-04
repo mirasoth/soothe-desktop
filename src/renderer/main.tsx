@@ -74,8 +74,14 @@ class ErrorBoundary extends React.Component<
 const hasBridge =
   typeof window !== 'undefined' && (window as Window & { soothe?: unknown }).soothe;
 
+// NOTE: StrictMode is intentionally NOT used here. React 18 StrictMode double-
+// invokes effects in dev (mount → cleanup → mount), which works fine for pure
+// React state but causes our IPC listener registration to fire twice. Even
+// though we return a cleanup, there is a window during the double-mount where
+// the second listener registers before any incoming event is matched against
+// the deregistration, causing every event from main to be appended to the
+// store twice. The renderer is small enough that StrictMode's other benefits
+// don't outweigh this concrete bug.
 ReactDOM.createRoot(root).render(
-  <React.StrictMode>
-    <ErrorBoundary>{hasBridge ? <App /> : <PreloadMissing />}</ErrorBoundary>
-  </React.StrictMode>,
+  <ErrorBoundary>{hasBridge ? <App /> : <PreloadMissing />}</ErrorBoundary>,
 );

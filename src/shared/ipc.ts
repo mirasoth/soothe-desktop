@@ -7,6 +7,7 @@ export const Channels = {
   DaemonHealth: 'daemon:health',
   LoopsList: 'loops:list',
   LoopsDelete: 'loops:delete',
+  LoopsMessages: 'loops:messages',
   SkillsList: 'skills:list',
   TabOpen: 'tab:open',
   TabInput: 'tab:input',
@@ -40,16 +41,45 @@ export interface LoopSummary {
   status?: string;
   client_workspace?: string;
   current_workspace?: string;
+  /** Number of CoreAgent threads bound to the loop (0 = never used). */
+  threads?: number;
+  /** Total goals completed by the loop. */
+  goals?: number;
+  /** Total thread switches. */
+  switches?: number;
   total_goals_completed?: number;
   total_tokens_used?: number;
+  /** Truncated ISO string from daemon's loop_list (e.g. "2026-06-04T07:27"). */
+  created?: string;
   last_message_at?: string | number | null;
   created_at?: string | number | null;
   is_ephemeral?: boolean;
-  /** Sidebar-derived: first user message preview, when one exists. */
+  /** Sidebar-derived: first user message preview, used as tab title on open. */
   title?: string;
+  /** Sidebar-derived: latest conversational message, prefixed You:/AI:. */
+  latestPreview?: string;
   /** Sidebar-derived: true if at least one human/user message is recorded. */
   hasUserMessage?: boolean;
   [key: string]: unknown;
+}
+
+export interface LoopMessageRow {
+  timestamp: string;
+  kind: string;
+  role: 'user' | 'assistant' | 'system' | null;
+  content: string;
+  [key: string]: unknown;
+}
+
+export interface LoopsMessagesRequest {
+  loopId: string;
+  limit?: number;
+}
+
+export interface LoopsMessagesResponse {
+  loopId: string;
+  messages: LoopMessageRow[];
+  error?: string;
 }
 
 export interface LoopsListResponse {
@@ -168,6 +198,7 @@ export interface SootheBridge {
   daemonHealth(): Promise<DaemonHealthResponse>;
   loopsList(): Promise<LoopsListResponse>;
   loopsDelete(req: LoopsDeleteRequest): Promise<LoopsDeleteResponse>;
+  loopsMessages(req: LoopsMessagesRequest): Promise<LoopsMessagesResponse>;
   skillsList(req: SkillsListRequest): Promise<SkillsListResponse>;
   tabOpen(req: TabOpenRequest): Promise<TabOpenResponse>;
   tabInput(req: TabInputRequest): Promise<void>;

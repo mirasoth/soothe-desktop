@@ -32,29 +32,33 @@ export function TabBar(): React.ReactElement | null {
 
   return (
     <div className="flex h-9 flex-none items-stretch border-b border-border bg-card/30 scrollbar-thin overflow-x-auto">
-      {tabs.map(tab => (
-        <button
-          key={tab.tabId}
-          type="button"
-          onClick={() => setActiveTab(tab.tabId)}
-          className={cn(
-            'group flex min-w-0 max-w-[220px] flex-none items-center gap-2 border-r border-border px-3 text-xs',
-            activeTabId === tab.tabId
-              ? 'bg-background text-foreground'
-              : 'text-muted-foreground hover:bg-accent/40',
-          )}
-          title={tab.loopId}
-        >
-          {statusGlyph(tab)}
-          <span className="truncate">{truncate(tab.title, 24)}</span>
-          <span
-            className="ml-auto rounded p-0.5 text-muted-foreground opacity-0 hover:bg-destructive/20 hover:text-destructive group-hover:opacity-100"
-            onClick={e => void onClose(tab.tabId, e)}
+      {tabs.map(tab => {
+        const isActive = activeTabId === tab.tabId;
+        return (
+          <button
+            key={tab.tabId}
+            type="button"
+            aria-current={isActive ? 'page' : undefined}
+            onClick={() => setActiveTab(tab.tabId)}
+            className={cn(
+              'group relative flex min-w-0 max-w-[240px] flex-none items-center gap-2 border-r border-border px-3 text-xs transition-colors',
+              isActive
+                ? 'bg-background text-foreground font-medium shadow-[inset_0_-2px_0_0_hsl(var(--primary))]'
+                : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
+            )}
+            title={tab.loopId}
           >
-            ×
-          </span>
-        </button>
-      ))}
+            {statusGlyph(tab)}
+            <span className="truncate">{truncate(tab.title, 26)}</span>
+            <span
+              className="ml-auto rounded p-0.5 text-muted-foreground opacity-0 hover:bg-destructive/20 hover:text-destructive group-hover:opacity-100"
+              onClick={e => void onClose(tab.tabId, e)}
+            >
+              ×
+            </span>
+          </button>
+        );
+      })}
     </div>
   );
 }

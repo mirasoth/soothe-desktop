@@ -5,7 +5,9 @@ import { Channels, type TabConnectionState, type TabEventEnvelope, type TabStatu
 import { getSettings } from './settings.js';
 
 const DEFAULT_VERBOSITY = 'full';
-const RECONNECT_BACKOFF_MS = [500, 1_000, 2_000, 4_000, 8_000];
+// Exponential backoff capped at 30s — retry forever until the user closes the
+// tab or the daemon answers. Index `n` is the n-th consecutive failed attempt.
+const RECONNECT_BACKOFF_MS = [500, 1_000, 2_000, 4_000, 8_000, 15_000, 30_000];
 
 interface Tab {
   tabId: string;
@@ -190,41 +192,59 @@ class WSManager {
   }
 
   private async consumeMessages(tab: Tab): Promise<void> {
-    const { client, tabId } = tab;
-    let backoffAttempt = 0;
+    // Consume the currently-connected client until the connection drops or the
+    // tab is closed.
     try {
-      for await (const msg of client.receiveMessages(tab.consumeAbort.signal)) {
-        if (tab.closing) break;
-        this.broadcastEvent({ tabId, event: msg as Record<string, unknown> });
-        backoffAttempt = 0;
+      for await (const msg of tab.client.receiveMessages(tab.consumeAbort.signal)) {
+        if (tab.closing) return;
+        this.broadcastEvent({ tabId: tab.tabId, event: msg as Record<string, unknown> });
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.broadcastStatus({ tabId, state: 'error', error: message });
+    } catch {
+      // swallow — fall through to the reconnect loop below
     }
 
     if (tab.closing) return;
 
-    // Connection ended. Attempt one-shot reconnect via reattach.
-    this.broadcastStatus({ tabId, state: 'reconnecting' });
-    const delay = RECONNECT_BACKOFF_MS[Math.min(backoffAttempt, RECONNECT_BACKOFF_MS.length - 1)]!;
-    await new Promise(resolve => setTimeout(resolve, delay));
+    // Connection ended (daemon restart, network blip, etc.). Reconnect with
+    // capped exponential backoff. Retry forever until either the user closes
+    // the tab or a fresh subscription is established.
+    let attempt = 0;
+    while (!tab.closing) {
+      const delay = RECONNECT_BACKOFF_MS[Math.min(attempt, RECONNECT_BACKOFF_MS.length - 1)]!;
+      this.broadcastStatus({
+        tabId: tab.tabId,
+        state: 'reconnecting',
+        error: attempt > 0 ? `retry #${attempt + 1} in ${Math.round(delay / 1000)}s` : undefined,
+      });
+      await new Promise(resolve => setTimeout(resolve, delay));
+      if (tab.closing) return;
 
-    if (tab.closing) return;
-    try {
-      const fresh = new Client(getSettings().daemonUrl);
-      await fresh.connect();
-      await fresh.waitForDaemonReady(10_000);
-      await fresh.sendLoopReattach(tab.loopId);
-      await fresh.sendLoopSubscribe(tab.loopId, DEFAULT_VERBOSITY);
-      await fresh.waitForSubscriptionConfirmed(tab.loopId, DEFAULT_VERBOSITY, 10_000);
-      tab.client = fresh;
-      tab.consumeAbort = new AbortController();
-      this.broadcastStatus({ tabId, state: 'ready' });
-      void this.consumeMessages(tab);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.broadcastStatus({ tabId, state: 'error', error: message });
+      try {
+        const fresh = new Client(getSettings().daemonUrl);
+        await fresh.connect();
+        await fresh.waitForDaemonReady(10_000);
+        await fresh.sendLoopReattach(tab.loopId);
+        await fresh.sendLoopSubscribe(tab.loopId, DEFAULT_VERBOSITY);
+        await fresh.waitForSubscriptionConfirmed(tab.loopId, DEFAULT_VERBOSITY, 10_000);
+        tab.client = fresh;
+        tab.consumeAbort = new AbortController();
+        this.broadcastStatus({ tabId: tab.tabId, state: 'ready' });
+        void this.consumeMessages(tab);
+        return;
+      } catch (err) {
+        // Tear down the half-open client and keep trying. We *don't* flip to
+        // 'error' here — the user shouldn't see "Connection error" while a
+        // reconnect is still in progress.
+        attempt += 1;
+        const message = err instanceof Error ? err.message : String(err);
+        // Surface the most recent error in the status so the renderer can
+        // optionally show "still trying… (last error: ECONNREFUSED)".
+        this.broadcastStatus({
+          tabId: tab.tabId,
+          state: 'reconnecting',
+          error: message,
+        });
+      }
     }
   }
 

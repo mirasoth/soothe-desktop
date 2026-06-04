@@ -34,13 +34,38 @@ export function AssistantBubble({ event }: EventCardProps): React.ReactElement |
   );
 }
 
+/**
+ * Detect whether a human message likely contains rich markdown (code fences,
+ * lists, links, etc). If not — and most user prompts are short plain text —
+ * render as preserved plain text so we avoid the prose paragraph margins
+ * that make a one-word reply ("yes") look like a tall card.
+ */
+function looksLikeMarkdown(text: string): boolean {
+  return /```|^\s*[-*]\s|^\s*\d+\.\s|\[[^\]]+\]\([^)]+\)|`[^`]+`|^\s*#/m.test(text);
+}
+
 export function HumanBubble({ event }: EventCardProps): React.ReactElement | null {
   const text = extractText(event);
   if (!text.trim()) return null;
+  const rich = looksLikeMarkdown(text);
   return (
     <div className="flex w-full justify-end">
-      <div className="max-w-[85%] rounded-lg bg-primary px-4 py-3 text-primary-foreground shadow-sm">
-        <Markdown>{text}</Markdown>
+      <div
+        className={
+          // Right-aligned soft bubble. Uses `accent` (subtle gray) rather than
+          // `primary` (high-contrast inverse) so it sits comfortably next to the
+          // assistant card without dominating the chat. Asymmetric corners give
+          // a "your-side" cue. Width fits content up to 75% of the chat.
+          'inline-flex max-w-[75%] flex-col rounded-2xl rounded-tr-md bg-accent px-3.5 py-2 text-sm text-foreground shadow-sm'
+        }
+      >
+        {rich ? (
+          <Markdown className="!prose-p:my-1 [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+            {text}
+          </Markdown>
+        ) : (
+          <span className="whitespace-pre-wrap break-words leading-snug">{text}</span>
+        )}
       </div>
     </div>
   );
