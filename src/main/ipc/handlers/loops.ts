@@ -1,5 +1,5 @@
 import { ipcMain } from 'electron';
-import { Client } from 'soothe-client-typescript';
+import { Client } from '@mirasoth/soothe-client';
 import {
   Channels,
   type LoopSummary,
@@ -39,23 +39,37 @@ function extractFirstUserPreview(messages: unknown): { title?: string; hasUserMe
   return { hasUserMessage: false };
 }
 
+const ENRICH_CONCURRENCY = 4;
+const ENRICH_TIMEOUT_MS = 15_000;
+
+async function enrichOne(client: Client, loop: LoopSummary): Promise<LoopSummary> {
+  try {
+    const resp = (await client.requestResponse(
+      { type: 'loop_messages', loop_id: loop.loop_id, limit: 20 },
+      'loop_messages_response',
+      ENRICH_TIMEOUT_MS,
+    )) as { messages?: unknown };
+    const { title, hasUserMessage } = extractFirstUserPreview(resp?.messages);
+    return { ...loop, title, hasUserMessage };
+  } catch {
+    // Timeout / error — surface as "unknown" (undefined) so the sidebar shows
+    // the loop rather than hiding it.
+    return { ...loop };
+  }
+}
+
 async function enrichLoops(client: Client, loops: LoopSummary[]): Promise<LoopSummary[]> {
-  const enriched = await Promise.all(
-    loops.map(async loop => {
-      try {
-        const resp = (await client.requestResponse(
-          { type: 'loop_messages', loop_id: loop.loop_id, limit: 20 },
-          'loop_messages_response',
-          8_000,
-        )) as { messages?: unknown };
-        const { title, hasUserMessage } = extractFirstUserPreview(resp?.messages);
-        return { ...loop, title, hasUserMessage };
-      } catch {
-        return { ...loop, hasUserMessage: false };
-      }
-    }),
-  );
-  return enriched;
+  const out: LoopSummary[] = new Array(loops.length);
+  let idx = 0;
+  const workers = Array.from({ length: Math.min(ENRICH_CONCURRENCY, loops.length) }, async () => {
+    while (true) {
+      const cursor = idx++;
+      if (cursor >= loops.length) return;
+      out[cursor] = await enrichOne(client, loops[cursor]!);
+    }
+  });
+  await Promise.all(workers);
+  return out;
 }
 
 export function registerLoopsHandlers(): void {

@@ -42,6 +42,9 @@ export function Composer({ tab }: Props): React.ReactElement {
       });
   };
 
+  const appendTabEvent = useStore(s => s.appendTabEvent);
+  const patchTab = useStore(s => s.patchTab);
+
   const send = async (): Promise<void> => {
     const text = draft.trim();
     if (!text && attachments.length === 0) return;
@@ -58,6 +61,21 @@ export function Composer({ tab }: Props): React.ReactElement {
 
     const isClarification = tab.clarification?.status === 'pending';
     const intentHint = text.startsWith('/skill:') ? extractSkillIntent(text) : undefined;
+
+    // Optimistic UI: append the user's text to the chat scroll immediately
+    // and promote the tab title if it's still generic. The daemon does not
+    // echo user input back to subscribers.
+    if (text) {
+      appendTabEvent(tab.tabId, { type: 'human', content: text });
+      const generic =
+        !tab.title ||
+        tab.title === 'New chat' ||
+        tab.title.startsWith(tab.loopId.slice(0, 8));
+      if (generic) {
+        patchTab(tab.tabId, { title: text.slice(0, 60) });
+      }
+    }
+
     await soothe().tabInput({
       tabId: tab.tabId,
       text,

@@ -28,11 +28,36 @@ function coalesceAssistantChunks(tab: TabState): Item[] {
   };
   for (const entry of tab.events) {
     const type = entry.event.type;
-    if (type === 'AIMessageChunk' || type === 'AIMessage') {
+    // Coalesce streaming chunks into a single assistant bubble per turn.
+    if (type === 'AIMessageChunk') {
       const text = extractText(entry.event);
       if (!buffer) buffer = { id: `assist-${entry.id}`, text };
       else buffer.text += text;
       continue;
+    }
+    // A full ai/AIMessage that matches an in-progress chunk buffer is the
+    // canonical version — replace the buffer rather than emit a duplicate.
+    if ((type === 'ai' || type === 'AIMessage') && buffer) {
+      buffer.text = extractText(entry.event) || buffer.text;
+      buffer.id = `assist-${entry.id}`;
+      continue;
+    }
+    // Dedupe: if the daemon emits the same full ai/AIMessage twice in a row
+    // (no chunks involved), drop the second.
+    if (type === 'ai' || type === 'AIMessage') {
+      const text = extractText(entry.event).trim();
+      const prev = out[out.length - 1];
+      if (
+        prev &&
+        prev.kind === 'event' &&
+        (prev.event.type === 'ai' || prev.event.type === 'AIMessage') &&
+        extractText(prev.event).trim() === text
+      ) {
+        continue;
+      }
+      if (prev && prev.kind === 'assistant' && prev.text.trim() === text) {
+        continue;
+      }
     }
     flush();
     out.push({

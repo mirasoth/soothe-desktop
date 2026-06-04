@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { WebContents } from 'electron';
-import { Client, type InputOptions } from 'soothe-client-typescript';
+import { Client, type InputOptions } from '@mirasoth/soothe-client';
 import { Channels, type TabConnectionState, type TabEventEnvelope, type TabStatusEvent } from '@shared/ipc';
 import { getSettings } from './settings.js';
 
@@ -181,7 +181,7 @@ class WSManager {
       };
 
       client.on('message', onMessage);
-      client.sendLoopNew().catch(err => {
+      client.sendLoopNew().catch((err: unknown) => {
         clearTimeout(timer);
         client.removeListener('message', onMessage);
         reject(err instanceof Error ? err : new Error(String(err)));

@@ -127,7 +127,12 @@ function handleTabEvent(envelope: TabEventEnvelope): void {
   const wireType = typeof wire.type === 'string' ? wire.type : '';
 
   // Lifecycle envelopes — flip tab status, never appended as event log entries.
-  if (wireType === 'subscription_confirmed' || wireType === 'history_replay_complete') {
+  if (
+    wireType === 'subscription_confirmed' ||
+    wireType === 'history_replay_complete' ||
+    wireType === 'replay_complete' ||
+    wireType === 'loop_reattached'
+  ) {
     state.patchTab(envelope.tabId, { status: 'ready' });
     return;
   }
@@ -139,15 +144,24 @@ function handleTabEvent(envelope: TabEventEnvelope): void {
     wireType === 'loop_input_response' ||
     wireType === 'loop_new_response' ||
     wireType === 'loop_reattach_response' ||
+    wireType === 'loop_detach_response' ||
     wireType === 'status' ||
     wireType === 'clear'
   ) {
     return;
   }
 
-  // history_replay envelope wraps an inner event under "event".
-  if (wireType === 'history_replay' && typeof wire.event === 'object' && wire.event !== null) {
-    forwardInner(envelope.tabId, wire.event as Record<string, unknown>);
+  // history_replay envelope: {type: "history_replay", events: [...], total_events}.
+  // Iterate the array and forward each inner event individually.
+  if (wireType === 'history_replay') {
+    const events = wire.events;
+    if (Array.isArray(events)) {
+      for (const inner of events) {
+        if (inner && typeof inner === 'object') {
+          forwardInner(envelope.tabId, inner as Record<string, unknown>);
+        }
+      }
+    }
     return;
   }
 
@@ -179,8 +193,8 @@ function forwardInner(tabId: string, inner: Record<string, unknown>): void {
   if (!type) return;
   const state = useStore.getState();
 
-  // First HumanMessage on a generic-title tab — promote to a real title.
-  if (type === 'HumanMessage' || type === 'human' || type === 'HumanMessageChunk') {
+  // First user-side message on a generic-title tab — promote to a real title.
+  if (type === 'human' || type === 'HumanMessage' || type === 'HumanMessageChunk') {
     const text = extractFlatText(inner);
     if (text) {
       const tab = state.tabs.find(t => t.tabId === tabId);

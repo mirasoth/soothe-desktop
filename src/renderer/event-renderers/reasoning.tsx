@@ -5,24 +5,53 @@ import type { EventCardProps } from './registry.js';
 
 function extractReasoning(event: Record<string, unknown>): { title: string; body: string } {
   const data = (event.data ?? event) as Record<string, unknown>;
-  const title =
-    (data.reasoning_type as string | undefined) ??
-    (data.phase as string | undefined) ??
-    deriveTitleFromType(event.type as string);
-  const body =
-    (data.text as string | undefined) ??
-    (data.content as string | undefined) ??
-    (data.reasoning as string | undefined) ??
-    (data.message as string | undefined) ??
-    JSON.stringify(data, null, 2);
-  return { title, body };
+  const type = (event.type as string) ?? '';
+  const title = deriveTitleFromType(type, data);
+
+  // Try a series of common reasoning/plan fields in priority order.
+  const candidates: Array<unknown> = [
+    data.assessment_reasoning,
+    data.reasoning,
+    data.text,
+    data.content,
+    data.message,
+    data.next_action,
+    data.goal,
+    data.progress,
+    data.plan_summary,
+    data.summary,
+    data.status,
+  ];
+  const body = candidates
+    .map(v => (typeof v === 'string' ? v.trim() : ''))
+    .filter(Boolean)
+    .join('\n\n');
+
+  if (body) return { title, body };
+
+  // Last resort — pretty-print whichever subset of fields is meaningful.
+  const interesting = Object.fromEntries(
+    Object.entries(data).filter(([k, v]) => {
+      if (['type', 'timestamp', 'thread_id', 'request_id', 'loop_id', 'event_id'].includes(k)) return false;
+      if (v === null || v === undefined || v === '') return false;
+      return true;
+    }),
+  );
+  return { title, body: Object.keys(interesting).length ? JSON.stringify(interesting, null, 2) : '(no detail)' };
 }
 
-function deriveTitleFromType(type: string): string {
+function deriveTitleFromType(type: string, data: Record<string, unknown>): string {
   if (type.includes('plan.created')) return 'Plan';
   if (type.includes('plan.decision')) return 'Plan decision';
-  if (type.includes('reason')) return 'Reasoning';
+  if (type.endsWith('.started')) return data.goal ? `Goal: ${truncate(String(data.goal), 60)}` : 'Started';
+  if (type.endsWith('.reasoned') || type.includes('reason')) return 'Reasoning';
+  if (type.endsWith('.iterated')) return 'Iteration';
+  if (type.endsWith('.completed')) return 'Completed';
   return 'Thinking';
+}
+
+function truncate(s: string, n: number): string {
+  return s.length > n ? s.slice(0, n - 1) + '…' : s;
 }
 
 export function ReasoningCard(props: EventCardProps): React.ReactElement {

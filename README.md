@@ -57,7 +57,7 @@ Unit tests cover state slices, the event-renderer registry, IPC payload contract
 See [RFC-505](../../docs/specs/RFC-505-soothe-desktop-client.md) and [IG-465](../../docs/impl/IG-465-soothe-desktop-mvp.md).
 
 Briefly:
-- **Main process** owns all WebSocket connections via `soothe-client-typescript`. One `Client` per open tab.
+- **Main process** owns all WebSocket connections via `@mirasoth/soothe-client`. One `Client` per open tab.
 - **Renderer** is a typed IPC consumer with no socket state of its own.
 - **Event registry** keys React renderers off the daemon's `soothe.<domain>.<component>.<action>` event types (RFC-403); unknown types render a debug fallback.
 

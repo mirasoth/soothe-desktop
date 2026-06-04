@@ -1,7 +1,7 @@
 /**
  * Browser-safe helpers for event-namespace parsing and matching.
  *
- * These mirror the helpers in `soothe-client-typescript`'s `events.ts` but are
+ * These mirror the helpers in `@mirasoth/soothe-client`'s `events.ts` but are
  * reimplemented here so the renderer bundle does not pull in the client
  * package (which depends on Node-only modules `ws`, `events`, `crypto`).
  *

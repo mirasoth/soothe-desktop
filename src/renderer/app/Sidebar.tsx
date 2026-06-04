@@ -13,6 +13,17 @@ function tsValue(value: string | number | null | undefined): number {
   return Number.isNaN(parsed) ? 0 : parsed;
 }
 
+function loopSortKey(loop: { last_message_at?: string | number | null; created?: unknown }): number {
+  const last = tsValue(loop.last_message_at);
+  if (last > 0) return last;
+  // daemon's loop_list returns `created` (a string like "2026-06-04T14:23") when
+  // last_message_at is not surfaced. Fall back to that.
+  const created = typeof loop.created === 'string' || typeof loop.created === 'number'
+    ? tsValue(loop.created as string | number)
+    : 0;
+  return created;
+}
+
 interface SidebarProps {
   disabled?: boolean;
 }
@@ -41,7 +52,7 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
         if (tabs.some(t => t.loopId === loop.loop_id)) return true;
         return loop.hasUserMessage !== false;
       })
-      .sort((a, b) => tsValue(b.last_message_at) - tsValue(a.last_message_at));
+      .sort((a, b) => loopSortKey(b) - loopSortKey(a));
   }, [loops, tabs]);
 
   const refresh = async (): Promise<void> => {
@@ -174,7 +185,13 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
                     <div className="min-w-0 flex-1">
                       <div className="truncate">{truncate(displayTitle, 40)}</div>
                       <div className="truncate text-[10px] text-muted-foreground">
-                        {loop.status ?? 'idle'} · {formatTimestamp(loop.last_message_at)}
+                        {loop.status ?? 'idle'} ·{' '}
+                        {formatTimestamp(
+                          (loop.last_message_at as string | number | null | undefined) ??
+                            (typeof loop.created === 'string' || typeof loop.created === 'number'
+                              ? (loop.created as string | number)
+                              : null),
+                        )}
                       </div>
                     </div>
                     <button

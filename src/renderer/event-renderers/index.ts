@@ -2,7 +2,7 @@
  * Register all built-in event renderers. Called once from main.tsx.
  */
 import { registerRenderer, registerFallback } from './registry.js';
-import { AssistantBubble } from './assistant.js';
+import { AssistantBubble, HumanBubble, ToolMessageCard } from './assistant.js';
 import { ReasoningCard } from './reasoning.js';
 import { ToolCard } from './tool.js';
 import { SubagentChip } from './subagent.js';
@@ -13,9 +13,19 @@ import { ClarificationCard } from '../features/clarification/ClarificationCard.j
 import { DiffCard } from './diff.js';
 
 export function registerAllRenderers(): void {
-  // Assistant / final
+  // LangChain wire tags (canonical per IG-440):
+  //   short tags: ai, human, system, tool         — used for full messages
+  //   long tags : AIMessageChunk, HumanMessageChunk — used for streaming chunks
+  registerRenderer('ai', AssistantBubble);
   registerRenderer('AIMessage', AssistantBubble);
   registerRenderer('AIMessageChunk', AssistantBubble);
+  registerRenderer('human', HumanBubble);
+  registerRenderer('HumanMessage', HumanBubble);
+  registerRenderer('HumanMessageChunk', HumanBubble);
+  registerRenderer('tool', ToolMessageCard);
+  registerRenderer('ToolMessage', ToolMessageCard);
+
+  // Final reports / completion
   registerRenderer('soothe.cognition.agent_loop.completed', FinalReportCard);
   registerRenderer('soothe.cognition.agentic.step.completed', FinalReportCard);
 

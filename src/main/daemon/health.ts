@@ -1,4 +1,4 @@
-import { Client, checkDaemonStatus } from 'soothe-client-typescript';
+import { Client, checkDaemonStatus } from '@mirasoth/soothe-client';
 import type { DaemonHealthResponse } from '@shared/ipc';
 import { getSettings } from './settings.js';
 
