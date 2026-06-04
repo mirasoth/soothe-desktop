@@ -45,6 +45,10 @@ export interface LoopSummary {
   last_message_at?: string | number | null;
   created_at?: string | number | null;
   is_ephemeral?: boolean;
+  /** Sidebar-derived: first user message preview, when one exists. */
+  title?: string;
+  /** Sidebar-derived: true if at least one human/user message is recorded. */
+  hasUserMessage?: boolean;
   [key: string]: unknown;
 }
 

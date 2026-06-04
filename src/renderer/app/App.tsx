@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { soothe } from '../lib/ipc.js';
-import { useStore, makeTab } from '../state/store.js';
+import { useStore } from '../state/store.js';
 import type { TabEventEnvelope, TabStatusEvent } from '@shared/ipc';
 import { EmptyState } from './EmptyState.js';
 import { Sidebar } from './Sidebar.js';
@@ -71,6 +71,16 @@ export function App(): React.ReactElement {
       if (mod && e.key.toLowerCase() === 'k') {
         e.preventDefault();
         setPaletteOpen(true);
+        return;
+      }
+      if (mod && e.key.toLowerCase() === 'w') {
+        e.preventDefault();
+        const s = useStore.getState();
+        const activeId = s.activeTabId;
+        if (!activeId) return;
+        s.removeTab(activeId);
+        void soothe().tabClose({ tabId: activeId, mode: 'detach' });
+        return;
       }
     };
     window.addEventListener('keydown', onKey);
@@ -113,48 +123,123 @@ export function App(): React.ReactElement {
 
 function handleTabEvent(envelope: TabEventEnvelope): void {
   const state = useStore.getState();
-  const event = envelope.event as Record<string, unknown> & { type?: string };
-  const type = typeof event.type === 'string' ? event.type : '';
+  const wire = envelope.event as Record<string, unknown> & { type?: string };
+  const wireType = typeof wire.type === 'string' ? wire.type : '';
 
-  // history_replay frames carry an inner event under "event"
-  if (type === 'history_replay' && typeof event.event === 'object' && event.event !== null) {
-    const inner = event.event as Record<string, unknown> & { type?: string };
-    if (typeof inner.type === 'string') {
-      state.appendTabEvent(envelope.tabId, inner as Record<string, unknown> & { type: string });
-      return;
-    }
-  }
-
-  if (type === 'subscription_confirmed' || type === 'history_replay_complete') {
+  // Lifecycle envelopes — flip tab status, never appended as event log entries.
+  if (wireType === 'subscription_confirmed' || wireType === 'history_replay_complete') {
     state.patchTab(envelope.tabId, { status: 'ready' });
     return;
   }
 
-  if (!type) return;
+  // Acks / status frames the daemon emits for RPC bookkeeping. Drop silently
+  // rather than render as debug cards.
+  if (
+    wireType === 'loop_subscribe_response' ||
+    wireType === 'loop_input_response' ||
+    wireType === 'loop_new_response' ||
+    wireType === 'loop_reattach_response' ||
+    wireType === 'status' ||
+    wireType === 'clear'
+  ) {
+    return;
+  }
 
-  // Clarification lifecycle hook (full handling in event renderers, but track state)
+  // history_replay envelope wraps an inner event under "event".
+  if (wireType === 'history_replay' && typeof wire.event === 'object' && wire.event !== null) {
+    forwardInner(envelope.tabId, wire.event as Record<string, unknown>);
+    return;
+  }
+
+  // `event` envelope per RFC-450: {type:"event", mode, data, namespace, loop_id}.
+  // The actual soothe.* event (or AIMessage wire frame) lives in `data`.
+  if (wireType === 'event') {
+    const mode = wire.mode as string | undefined;
+    const data = wire.data;
+    if (mode === 'messages' && Array.isArray(data) && data.length > 0) {
+      // messages-mode wire_data is a tuple [ai_message_dict, metadata].
+      forwardInner(envelope.tabId, data[0] as Record<string, unknown>);
+      return;
+    }
+    if (data && typeof data === 'object') {
+      forwardInner(envelope.tabId, data as Record<string, unknown>);
+      return;
+    }
+    return;
+  }
+
+  if (!wireType) return;
+
+  // Native soothe.* events (no envelope wrapper) — append directly.
+  forwardInner(envelope.tabId, wire as Record<string, unknown>);
+}
+
+function forwardInner(tabId: string, inner: Record<string, unknown>): void {
+  const type = typeof inner.type === 'string' ? inner.type : '';
+  if (!type) return;
+  const state = useStore.getState();
+
+  // First HumanMessage on a generic-title tab — promote to a real title.
+  if (type === 'HumanMessage' || type === 'human' || type === 'HumanMessageChunk') {
+    const text = extractFlatText(inner);
+    if (text) {
+      const tab = state.tabs.find(t => t.tabId === tabId);
+      const generic =
+        !tab?.title ||
+        tab.title === 'New chat' ||
+        /^[0-9a-f]{8}/.test(tab.title) ||
+        tab.title.startsWith(tab.loopId.slice(0, 8));
+      if (tab && generic) {
+        state.patchTab(tabId, { title: text.slice(0, 60) });
+      }
+    }
+  }
+
+  // Clarification lifecycle bookkeeping.
   if (type === 'soothe.loop.clarification.requested') {
-    const data = (event.data ?? event) as Record<string, unknown>;
+    const data = (inner.data ?? inner) as Record<string, unknown>;
     const questions = extractClarificationQuestions(data);
-    state.setClarification(envelope.tabId, {
+    state.setClarification(tabId, {
       questions,
       status: 'pending',
-      originStepId: (data.origin_step_id as string | undefined) ?? (data.step_id as string | undefined),
+      originStepId:
+        (data.origin_step_id as string | undefined) ?? (data.step_id as string | undefined),
       mode: (data.mode as 'auto' | 'manual' | undefined) ?? undefined,
     });
   } else if (
     type === 'soothe.loop.clarification.answered' ||
     type === 'soothe.loop.clarification.deferred'
   ) {
-    const tab = state.tabs.find(t => t.tabId === envelope.tabId);
+    const tab = state.tabs.find(t => t.tabId === tabId);
     if (tab?.clarification) {
-      state.setClarification(envelope.tabId, { ...tab.clarification, status: 'resolved' });
+      state.setClarification(tabId, { ...tab.clarification, status: 'resolved' });
     } else {
-      state.setClarification(envelope.tabId, undefined);
+      state.setClarification(tabId, undefined);
     }
   }
 
-  state.appendTabEvent(envelope.tabId, event as Record<string, unknown> & { type: string });
+  state.appendTabEvent(tabId, inner as Record<string, unknown> & { type: string });
+}
+
+function extractFlatText(event: Record<string, unknown>): string {
+  const direct = event.content ?? event.text;
+  if (typeof direct === 'string') return direct;
+  if (Array.isArray(direct)) {
+    return direct
+      .map(seg => {
+        if (typeof seg === 'string') return seg;
+        if (seg && typeof seg === 'object' && typeof (seg as { text?: string }).text === 'string') {
+          return (seg as { text: string }).text;
+        }
+        return '';
+      })
+      .join('');
+  }
+  const data = event.data;
+  if (data && typeof data === 'object') {
+    return extractFlatText(data as Record<string, unknown>);
+  }
+  return '';
 }
 
 function extractClarificationQuestions(data: Record<string, unknown>): string[] {
@@ -178,5 +263,4 @@ function applyTheme(theme: 'light' | 'dark' | 'system'): void {
   }
 }
 
-// Helper exported for tab module to construct tabs consistently.
-export { makeTab };
+export { makeTab } from '../state/store.js';

@@ -11,3 +11,6 @@ coverage
 *.tsbuildinfo
 .idea
 .vscode
+
+# Local CDP debug scratchpads (chrome-devtools protocol helpers)
+cdp-*.mjs

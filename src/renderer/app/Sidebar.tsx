@@ -1,9 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { soothe } from '../lib/ipc.js';
 import { useStore, makeTab } from '../state/store.js';
 import type { LoopSummary } from '@shared/ipc';
 import { Button } from '../ui/button.js';
+import { BrandMark } from '../ui/brand.js';
 import { cn, formatTimestamp, truncate } from '../lib/utils.js';
+
+function tsValue(value: string | number | null | undefined): number {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === 'number') return value > 1e12 ? value : value * 1000;
+  const parsed = Date.parse(value);
+  return Number.isNaN(parsed) ? 0 : parsed;
+}
 
 interface SidebarProps {
   disabled?: boolean;
@@ -23,6 +31,18 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
   const removeTab = useStore(s => s.removeTab);
 
   const [busy, setBusy] = useState(false);
+
+  const visibleLoops = useMemo(() => {
+    return loops
+      .filter(loop => {
+        // Hide loops with no human messages. Keep loops that are currently open
+        // in a tab (the user may be drafting a first message) and loops where
+        // we couldn't determine status (treat as visible to be safe).
+        if (tabs.some(t => t.loopId === loop.loop_id)) return true;
+        return loop.hasUserMessage !== false;
+      })
+      .sort((a, b) => tsValue(b.last_message_at) - tsValue(a.last_message_at));
+  }, [loops, tabs]);
 
   const refresh = async (): Promise<void> => {
     setLoopsLoading(true);
@@ -88,7 +108,7 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
         makeTab({
           tabId: resp.tabId,
           loopId: resp.loopId,
-          title: truncate(loop.loop_id, 24),
+          title: loop.title ? truncate(loop.title, 32) : truncate(loop.loop_id, 24),
         }),
       );
     } finally {
@@ -109,6 +129,9 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
 
   return (
     <aside className="flex w-72 flex-none flex-col border-r border-border bg-card/40">
+      <div className="flex items-center justify-between border-b border-border px-3 py-2">
+        <BrandMark size={20} />
+      </div>
       <div className="flex items-center gap-2 border-b border-border p-3">
         <Button size="sm" onClick={newChat} disabled={disabled || busy} className="flex-1">
           + New chat
@@ -122,15 +145,16 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
           <div className="p-3 text-xs text-muted-foreground">Loading…</div>
         ) : loopsError ? (
           <div className="p-3 text-xs text-destructive">{loopsError}</div>
-        ) : loops.length === 0 ? (
+        ) : visibleLoops.length === 0 ? (
           <div className="p-3 text-xs text-muted-foreground">
-            {disabled ? 'Daemon disconnected.' : 'No loops yet.'}
+            {disabled ? 'Daemon disconnected.' : 'No conversations yet.'}
           </div>
         ) : (
           <ul className="space-y-0.5 p-1">
-            {loops.map(loop => {
+            {visibleLoops.map(loop => {
               const open = tabs.find(t => t.loopId === loop.loop_id);
               const isActive = open?.tabId === activeTabId;
+              const displayTitle = loop.title?.trim() || loop.loop_id.slice(0, 8);
               return (
                 <li key={loop.loop_id}>
                   <div
@@ -139,7 +163,7 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
                       isActive ? 'bg-accent' : '',
                     )}
                     onClick={() => openLoop(loop)}
-                    title={loop.loop_id}
+                    title={`${loop.loop_id}${loop.title ? `\n${loop.title}` : ''}`}
                   >
                     <span
                       className={cn(
@@ -148,7 +172,7 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
                       )}
                     />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate font-mono">{loop.loop_id.slice(0, 24)}</div>
+                      <div className="truncate">{truncate(displayTitle, 40)}</div>
                       <div className="truncate text-[10px] text-muted-foreground">
                         {loop.status ?? 'idle'} · {formatTimestamp(loop.last_message_at)}
                       </div>

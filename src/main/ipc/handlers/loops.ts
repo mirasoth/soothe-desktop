@@ -20,11 +20,52 @@ async function withEphemeralClient<T>(fn: (client: Client) => Promise<T>): Promi
   }
 }
 
+interface ThreadMessageLike {
+  role?: 'user' | 'assistant' | 'system' | null;
+  kind?: string;
+  content?: string;
+}
+
+function extractFirstUserPreview(messages: unknown): { title?: string; hasUserMessage: boolean } {
+  if (!Array.isArray(messages)) return { hasUserMessage: false };
+  for (const raw of messages) {
+    if (!raw || typeof raw !== 'object') continue;
+    const m = raw as ThreadMessageLike;
+    if (m.role !== 'user') continue;
+    const text = typeof m.content === 'string' ? m.content.trim() : '';
+    if (!text) continue;
+    return { title: text, hasUserMessage: true };
+  }
+  return { hasUserMessage: false };
+}
+
+async function enrichLoops(client: Client, loops: LoopSummary[]): Promise<LoopSummary[]> {
+  const enriched = await Promise.all(
+    loops.map(async loop => {
+      try {
+        const resp = (await client.requestResponse(
+          { type: 'loop_messages', loop_id: loop.loop_id, limit: 20 },
+          'loop_messages_response',
+          8_000,
+        )) as { messages?: unknown };
+        const { title, hasUserMessage } = extractFirstUserPreview(resp?.messages);
+        return { ...loop, title, hasUserMessage };
+      } catch {
+        return { ...loop, hasUserMessage: false };
+      }
+    }),
+  );
+  return enriched;
+}
+
 export function registerLoopsHandlers(): void {
   ipcMain.handle(Channels.LoopsList, async (): Promise<LoopsListResponse> => {
     try {
-      const resp = await withEphemeralClient(client => client.listLoops(15_000));
-      const loops = (resp.loops as LoopSummary[] | undefined) ?? [];
+      const loops = await withEphemeralClient(async client => {
+        const resp = await client.listLoops(15_000);
+        const raw = (resp.loops as LoopSummary[] | undefined) ?? [];
+        return enrichLoops(client, raw);
+      });
       return { loops };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
