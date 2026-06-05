@@ -365,18 +365,26 @@ function forwardInner(tabId: string, inner: Record<string, unknown>): void {
       if (tab && generic) {
         state.patchTab(tabId, { title: text.slice(0, 60) });
       }
+      if (tab) {
+        state.patchLoop(tab.loopId, { hasUserMessage: true, title: text.slice(0, 60) });
+        state.bumpLoopsRefreshHint();
+      }
     }
   }
 
   // Agent running state bookkeeping.
   if (type === 'soothe.cognition.agent_loop.started') {
     state.patchTab(tabId, { isRunning: true });
+    const tab = state.tabs.find(t => t.tabId === tabId);
+    if (tab) state.patchLoop(tab.loopId, { status: 'running' });
   } else if (
     type === 'soothe.cognition.agent_loop.completed' ||
     type === 'soothe.cognition.agent_loop.cancelled' ||
     type === 'soothe.cognition.agent_loop.error'
   ) {
     state.patchTab(tabId, { isRunning: false });
+    const tab = state.tabs.find(t => t.tabId === tabId);
+    if (tab) state.patchLoop(tab.loopId, { status: 'idle' });
   }
 
   // Clarification lifecycle bookkeeping.
@@ -417,7 +425,7 @@ function extractFlatText(event: Record<string, unknown>): string {
         }
         return '';
       })
-      .join('');
+      .join('\n');
   }
   const data = event.data;
   if (data && typeof data === 'object') {

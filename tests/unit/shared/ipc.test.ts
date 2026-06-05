@@ -19,7 +19,7 @@ describe('DefaultSettings', () => {
     expect(DefaultSettings.daemonUrl).toMatch(/^ws:\/\/127\.0\.0\.1:8765$/);
   });
 
-  it('defaults to system theme', () => {
-    expect(DefaultSettings.theme).toBe('system');
+  it('defaults to light theme', () => {
+    expect(DefaultSettings.theme).toBe('light');
   });
 });

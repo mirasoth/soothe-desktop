@@ -289,7 +289,7 @@ function extractText(event: Record<string, unknown>): string {
             ? (seg as { text: string }).text
             : '',
       )
-      .join('');
+      .join('\n');
   }
   return '';
 }

@@ -22,6 +22,7 @@ import {
 
 const bridge: SootheBridge = {
   daemonHealth: () => ipcRenderer.invoke(Channels.DaemonHealth),
+  daemonLifecycle: () => ipcRenderer.invoke(Channels.DaemonLifecycle),
   loopsList: () => ipcRenderer.invoke(Channels.LoopsList),
   loopsDelete: (req: LoopsDeleteRequest) => ipcRenderer.invoke(Channels.LoopsDelete, req),
   loopsMessages: (req: LoopsMessagesRequest) => ipcRenderer.invoke(Channels.LoopsMessages, req),

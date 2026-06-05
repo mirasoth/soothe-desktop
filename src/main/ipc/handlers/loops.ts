@@ -96,34 +96,35 @@ function loopCacheKey(loop: LoopSummary): string {
 }
 
 async function enrichOne(client: Client, loop: LoopSummary): Promise<LoopSummary> {
-  // Loops with no bound thread (threads === 0) cannot have messages — calling
-  // loop_messages on them raises LOOP_CONTEXT on the daemon side. Skip the
-  // round-trip and mark as empty directly. This also cuts the call volume:
-  // brand-new "created" loops that the user never sent input to are very common
-  // and would otherwise show up in the sidebar as "unknown" placeholders.
+  // The daemon's loop_list response includes human_messages count and threads.
+  // A loop with threads > 0 had interaction — always show it.
+  // A loop with human_messages > 0 has confirmed user messages.
+  const humanCount = (loop as Record<string, unknown>).human_messages;
+  const hasHumanFromDaemon = typeof humanCount === 'number' && humanCount > 0;
   const threads = typeof loop.threads === 'number' ? loop.threads : 0;
+
   if (threads === 0) {
-    return { ...loop, hasUserMessage: false };
+    return { ...loop, hasUserMessage: hasHumanFromDaemon };
   }
+
+  // threads > 0 means user interacted — always mark as having messages.
+  // Fetch recent messages for title/preview enrichment only.
   try {
     const resp = (await client.requestResponse(
-      { type: 'loop_messages', loop_id: loop.loop_id, limit: 3 },
+      { type: 'loop_messages', loop_id: loop.loop_id, limit: 20 },
       'loop_messages_response',
       ENRICH_TIMEOUT_MS,
     )) as { messages?: unknown };
-    const { title, latestPreview, hasUserMessage, lastMessageAt } = extractPreviews(resp?.messages);
+    const { title, latestPreview, lastMessageAt } = extractPreviews(resp?.messages);
     return {
       ...loop,
       title,
       latestPreview,
-      hasUserMessage,
+      hasUserMessage: true,
       ...(lastMessageAt ? { last_message_at: lastMessageAt } : {}),
     };
   } catch {
-    // Timeout / error on a loop that DID have threads bound — we don't know
-    // whether it has user messages. Leave hasUserMessage undefined so the
-    // sidebar shows it (better to surface a possibly-real loop than hide it).
-    return { ...loop };
+    return { ...loop, hasUserMessage: true };
   }
 }
 

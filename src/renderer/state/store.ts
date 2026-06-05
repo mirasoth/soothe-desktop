@@ -66,6 +66,8 @@ export interface StoreState {
    * stream in before the tabOpen IPC response completes the renderer's addTab.
    */
   pendingEvents: Record<string, EventLogEntry[]>;
+  /** Incremented to signal Sidebar to schedule a debounced refresh. */
+  loopsRefreshHint: number;
   activeTabId?: string;
   jobs: JobSummary[];
   jobsLoading: boolean;
@@ -83,6 +85,8 @@ export interface StoreState {
   setLoops(loops: LoopSummary[]): void;
   setLoopsError(error?: string): void;
   setLoopsLoading(loading: boolean): void;
+  patchLoop(loopId: string, patch: Partial<LoopSummary>): void;
+  bumpLoopsRefreshHint(): void;
   addTab(tab: TabState): void;
   removeTab(tabId: string): void;
   setActiveTab(tabId?: string): void;
@@ -123,6 +127,7 @@ export const useStore = create<StoreState>()(
     loopsLoading: false,
     tabs: [],
     pendingEvents: {},
+    loopsRefreshHint: 0,
     jobs: [],
     jobsLoading: false,
     autopilotSubscribed: false,
@@ -135,6 +140,12 @@ export const useStore = create<StoreState>()(
     setLoops: loops => set({ loops, loopsError: undefined }),
     setLoopsError: error => set({ loopsError: error }),
     setLoopsLoading: loading => set({ loopsLoading: loading }),
+    patchLoop: (loopId, patch) =>
+      set(state => ({
+        loops: state.loops.map(l => (l.loop_id === loopId ? { ...l, ...patch } : l)),
+      })),
+    bumpLoopsRefreshHint: () =>
+      set(state => ({ loopsRefreshHint: state.loopsRefreshHint + 1 })),
     addTab: tab =>
       set(state => {
         // Drain any events that arrived for this tabId before addTab ran

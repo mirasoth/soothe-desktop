@@ -53,9 +53,13 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
   const addTab = useStore(s => s.addTab);
   const removeTab = useStore(s => s.removeTab);
 
+  const loopsRefreshHint = useStore(s => s.loopsRefreshHint);
+
   const [busy, setBusy] = useState(false);
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const refreshInFlightRef = useRef<Promise<void> | null>(null);
+  const refreshQueuedRef = useRef(false);
+  const retryCountRef = useRef(0);
 
   const visibleLoops = useMemo(() => {
     return loops
@@ -67,18 +71,31 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
   }, [loops, tabs]);
 
   const doRefresh = useCallback(async (): Promise<void> => {
-    if (refreshInFlightRef.current) return refreshInFlightRef.current;
+    if (refreshInFlightRef.current) {
+      refreshQueuedRef.current = true;
+      return refreshInFlightRef.current;
+    }
     setLoopsLoading(true);
     const p = soothe()
       .loopsList()
       .then(resp => {
         if (resp.error) setLoopsError(resp.error);
-        else setLoops(resp.loops);
+        else {
+          setLoopsError(undefined);
+          setLoops(resp.loops);
+        }
       })
-      .catch(() => undefined)
+      .catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : 'Failed to load chats';
+        setLoopsError(msg);
+      })
       .finally(() => {
         setLoopsLoading(false);
         refreshInFlightRef.current = null;
+        if (refreshQueuedRef.current) {
+          refreshQueuedRef.current = false;
+          void doRefresh();
+        }
       });
     refreshInFlightRef.current = p;
     return p;
@@ -93,7 +110,9 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
   }, [doRefresh]);
 
   useEffect(() => {
-    if (!disabled) debouncedRefresh();
+    if (!disabled) {
+      void doRefresh();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [disabled]);
 
@@ -108,6 +127,28 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
     };
   }, [disabled, debouncedRefresh]);
 
+  // Retry loading loops when previous attempt failed or daemon returned empty.
+  useEffect(() => {
+    if (disabled || loops.length > 0) {
+      retryCountRef.current = 0;
+      return;
+    }
+    if (retryCountRef.current >= 5) return;
+    const delay = loopsError ? 3000 : 2000;
+    const retryTimer = setTimeout(() => {
+      retryCountRef.current += 1;
+      void doRefresh();
+    }, delay);
+    return () => clearTimeout(retryTimer);
+  }, [disabled, loopsError, loops.length, doRefresh]);
+
+  // React to refresh hint from event routing (e.g. after first human message).
+  useEffect(() => {
+    if (loopsRefreshHint > 0) {
+      debouncedRefresh();
+    }
+  }, [loopsRefreshHint, debouncedRefresh]);
+
   const newChat = async (): Promise<void> => {
     if (disabled) return;
     setBusy(true);
@@ -119,6 +160,14 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
       }
       setActiveJobId(undefined);
       addTab(makeTab({ tabId: resp.tabId, loopId: resp.loopId, title: 'New chat' }));
+      // Optimistically add the new loop to the sidebar immediately.
+      const current = useStore.getState().loops;
+      if (!current.some(l => l.loop_id === resp.loopId)) {
+        setLoops([
+          { loop_id: resp.loopId, status: 'created', hasUserMessage: false, created: new Date().toISOString() },
+          ...current,
+        ]);
+      }
       debouncedRefresh();
     } finally {
       setBusy(false);
@@ -217,34 +266,69 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
 
   return (
     <aside className="flex w-72 flex-none flex-col border-r border-border bg-card/40">
+      {/* App title */}
+      <div className="flex items-center border-b border-border px-3 py-2">
+        <BrandMark size={18} />
+      </div>
+
+      {/* Project info */}
       <div
-        className="flex items-center justify-between border-b border-border px-3 py-2"
+        className="flex items-center gap-2 border-b border-border px-3 py-2"
         title={project.path ?? undefined}
       >
-        <div className="flex items-center gap-2 min-w-0">
-          <BrandMark size={16} />
-          <span className="truncate text-sm font-medium">{project.name || 'Soothe'}</span>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-1.5">
+            <span
+              className={cn(
+                'h-1.5 w-1.5 flex-none rounded-full',
+                disabled ? 'bg-red-500' : 'bg-emerald-500',
+              )}
+            />
+            <span className="truncate text-xs font-medium">
+              {project.name || 'No project'}
+            </span>
+          </div>
+          <div className="truncate pl-[9px] text-[10px] text-muted-foreground/60">
+            {project.path ?? 'No project selected'}
+          </div>
         </div>
-        <button
-          type="button"
-          className="flex-none rounded p-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
-          onClick={() => void switchProject()}
-          title="Switch project"
-        >
-          ⇄
-        </button>
-      </div>
-      <div className="flex items-center gap-2 border-b border-border p-3">
-        <Button size="sm" onClick={newChat} disabled={disabled || busy} className="flex-1">
-          + New chat
-        </Button>
-        <Button size="icon" variant="ghost" onClick={() => void doRefresh()} title="Refresh" disabled={disabled}>
-          ↻
-        </Button>
+        <div className="flex flex-none items-center gap-0.5">
+          <button
+            type="button"
+            className="rounded p-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+            onClick={() => void doRefresh()}
+            disabled={disabled}
+            title="Refresh"
+          >
+            ↻
+          </button>
+          <button
+            type="button"
+            className="rounded p-1 text-xs text-muted-foreground hover:bg-accent hover:text-foreground"
+            onClick={() => void switchProject()}
+            title="Switch project"
+          >
+            ⇄
+          </button>
+        </div>
       </div>
       <div className="flex-1 overflow-y-auto scrollbar-thin">
         {/* Chats section */}
-        <SectionHeader title="Chats" count={visibleLoops.length}>
+        <SectionHeader
+          title="Chats"
+          count={visibleLoops.length}
+          action={
+            <button
+              type="button"
+              className="rounded px-1.5 py-0.5 text-[11px] text-muted-foreground hover:bg-accent hover:text-foreground"
+              onClick={() => void newChat()}
+              disabled={disabled || busy}
+              title="New chat"
+            >
+              +
+            </button>
+          }
+        >
           {loopsLoading && loops.length === 0 ? (
             <div className="px-3 pb-2 text-xs text-muted-foreground">Loading...</div>
           ) : loopsError ? (
@@ -258,11 +342,18 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
               {visibleLoops.map(loop => {
                 const open = tabs.find(t => t.loopId === loop.loop_id);
                 const isActive = open?.tabId === activeTabId && !activeJobId;
+                const tabTitle = open?.title;
+                const hasRealTabTitle =
+                  tabTitle &&
+                  tabTitle !== 'New chat' &&
+                  !/^[0-9a-f]{8}/.test(tabTitle) &&
+                  !tabTitle.startsWith(loop.loop_id.slice(0, 8));
                 const headline =
                   loop.latestPreview?.trim() ||
+                  (hasRealTabTitle ? tabTitle : undefined) ||
                   loop.title?.trim() ||
                   loop.loop_id.slice(0, 8);
-                const status = simpleLoopStatus(loop.status);
+                const status = open?.isRunning ? 'running' : simpleLoopStatus(loop.status);
                 const stamp = formatTimestamp(loop.last_message_at ?? loop.created ?? null);
                 return (
                   <li key={loop.loop_id}>

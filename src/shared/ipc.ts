@@ -30,6 +30,7 @@ export const Channels = {
   SelectFolder: 'dialog:selectFolder',
   ProjectCheck: 'project:check',
   ProjectInit: 'project:init',
+  DaemonLifecycle: 'daemon:lifecycle',
 } as const;
 
 export type ChannelName = (typeof Channels)[keyof typeof Channels];
@@ -43,6 +44,14 @@ export interface DaemonHealthResponse {
   version?: string;
   error?: string;
   url: string;
+}
+
+export interface DaemonLifecycleStatus {
+  managed: boolean;
+  processRunning: boolean;
+  pid: number | null;
+  restartCount: number;
+  lastError: string | null;
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +344,7 @@ export interface ProjectInitResponse {
 
 export interface SootheBridge {
   daemonHealth(): Promise<DaemonHealthResponse>;
+  daemonLifecycle(): Promise<DaemonLifecycleStatus>;
   loopsList(): Promise<LoopsListResponse>;
   loopsDelete(req: LoopsDeleteRequest): Promise<LoopsDeleteResponse>;
   loopsMessages(req: LoopsMessagesRequest): Promise<LoopsMessagesResponse>;

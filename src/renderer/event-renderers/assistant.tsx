@@ -13,7 +13,7 @@ function extractText(event: Record<string, unknown>): string {
         }
         return '';
       })
-      .join('');
+      .join('\n');
   }
   const data = event.data;
   if (data && typeof data === 'object') {

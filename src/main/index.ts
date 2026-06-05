@@ -8,6 +8,7 @@ import { registerLoopsHandlers } from './ipc/handlers/loops.js';
 import { registerSkillsHandlers } from './ipc/handlers/skills.js';
 import { registerJobsHandlers } from './ipc/handlers/jobs.js';
 import { registerProjectHandlers } from './ipc/handlers/project.js';
+import { startDaemon, stopDaemon } from './daemon/lifecycle.js';
 
 app.setName('Soothe');
 
@@ -34,13 +35,17 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 }
 
-void app.whenReady().then(() => {
+void app.whenReady().then(async () => {
   registerDaemonHandlers();
   registerTabHandlers();
   registerLoopsHandlers();
   registerSkillsHandlers();
   registerJobsHandlers();
   registerProjectHandlers();
+
+  // Start daemon in background — window appears immediately while daemon boots.
+  // The renderer handles the "connecting" state gracefully.
+  void startDaemon();
 
   createMainWindow();
 
@@ -59,4 +64,5 @@ app.on('window-all-closed', () => {
 
 app.on('before-quit', () => {
   disposeAllTabs();
+  void stopDaemon();
 });
