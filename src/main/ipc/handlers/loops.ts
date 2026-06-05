@@ -78,8 +78,22 @@ function extractPreviews(messages: unknown): PreviewResult {
   };
 }
 
-const ENRICH_CONCURRENCY = 4;
+const ENRICH_CONCURRENCY = 1;
 const ENRICH_TIMEOUT_MS = 15_000;
+
+interface CachedEntry {
+  title?: string;
+  latestPreview?: string;
+  hasUserMessage: boolean;
+  lastMessageAt?: string;
+  cacheKey: string;
+}
+
+const enrichmentCache = new Map<string, CachedEntry>();
+
+function loopCacheKey(loop: LoopSummary): string {
+  return `${loop.threads ?? 0}|${loop.last_message_at ?? ''}`;
+}
 
 async function enrichOne(client: Client, loop: LoopSummary): Promise<LoopSummary> {
   // Loops with no bound thread (threads === 0) cannot have messages — calling
@@ -93,7 +107,7 @@ async function enrichOne(client: Client, loop: LoopSummary): Promise<LoopSummary
   }
   try {
     const resp = (await client.requestResponse(
-      { type: 'loop_messages', loop_id: loop.loop_id, limit: 100 },
+      { type: 'loop_messages', loop_id: loop.loop_id, limit: 3 },
       'loop_messages_response',
       ENRICH_TIMEOUT_MS,
     )) as { messages?: unknown };
@@ -133,7 +147,51 @@ export function registerLoopsHandlers(): void {
       const loops = await withEphemeralClient(async client => {
         const resp = await client.listLoops(15_000);
         const raw = (resp.loops as LoopSummary[] | undefined) ?? [];
-        return enrichLoops(client, raw);
+
+        const stale: LoopSummary[] = [];
+        const result: LoopSummary[] = [];
+        const staleIndices: number[] = [];
+        const currentIds = new Set<string>();
+
+        for (const loop of raw) {
+          currentIds.add(loop.loop_id);
+          const key = loopCacheKey(loop);
+          const cached = enrichmentCache.get(loop.loop_id);
+          if (cached && cached.cacheKey === key) {
+            result.push({
+              ...loop,
+              title: cached.title,
+              latestPreview: cached.latestPreview,
+              hasUserMessage: cached.hasUserMessage,
+              ...(cached.lastMessageAt ? { last_message_at: cached.lastMessageAt } : {}),
+            });
+          } else {
+            staleIndices.push(result.length);
+            result.push(loop);
+            stale.push(loop);
+          }
+        }
+
+        if (stale.length > 0) {
+          const enriched = await enrichLoops(client, stale);
+          for (let i = 0; i < enriched.length; i++) {
+            const e = enriched[i]!;
+            result[staleIndices[i]!] = e;
+            enrichmentCache.set(e.loop_id, {
+              title: e.title,
+              latestPreview: e.latestPreview,
+              hasUserMessage: e.hasUserMessage ?? false,
+              lastMessageAt: e.last_message_at,
+              cacheKey: loopCacheKey(e),
+            });
+          }
+        }
+
+        for (const id of enrichmentCache.keys()) {
+          if (!currentIds.has(id)) enrichmentCache.delete(id);
+        }
+
+        return result;
       });
       return { loops };
     } catch (err) {
@@ -147,6 +205,7 @@ export function registerLoopsHandlers(): void {
     async (_evt, req: LoopsDeleteRequest): Promise<LoopsDeleteResponse> => {
       try {
         await withEphemeralClient(client => client.deleteLoop(req.loopId, 10_000));
+        enrichmentCache.delete(req.loopId);
         return { loopId: req.loopId, success: true };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

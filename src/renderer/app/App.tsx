@@ -1,25 +1,31 @@
 import { useEffect } from 'react';
 import { soothe } from '../lib/ipc.js';
 import { useStore } from '../state/store.js';
-import type { TabEventEnvelope, TabStatusEvent } from '@shared/ipc';
+import type { AutopilotEventEnvelope, TabEventEnvelope, TabStatusEvent } from '@shared/ipc';
 import { EmptyState } from './EmptyState.js';
 import { Sidebar } from './Sidebar.js';
 import { TabBar } from './TabBar.js';
 import { TabView } from './TabView.js';
 import { CommandPalette } from '../features/command-palette/CommandPalette.js';
 import { SettingsDialog } from '../features/settings/SettingsDialog.js';
+import { JobCreateDialog } from '../features/jobs/JobCreateDialog.js';
+import { ProjectScreen } from '../features/project/ProjectScreen.js';
+import { DagView } from '../features/dag/DagView.js';
 import { cn } from '../lib/utils.js';
 
 export function App(): React.ReactElement {
   const daemon = useStore(s => s.daemon);
   const settings = useStore(s => s.settings);
+  const project = useStore(s => s.project);
   const tabs = useStore(s => s.tabs);
   const activeTabId = useStore(s => s.activeTabId);
+  const activeJobId = useStore(s => s.activeJobId);
   const setDaemon = useStore(s => s.setDaemon);
   const setSettings = useStore(s => s.setSettings);
+  const setProject = useStore(s => s.setProject);
   const setPaletteOpen = useStore(s => s.setPaletteOpen);
 
-  // Bootstrap: load settings, probe daemon, poll periodically.
+  // Bootstrap: load settings, resolve project, probe daemon.
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -27,13 +33,29 @@ export function App(): React.ReactElement {
       if (cancelled) return;
       setSettings(initial);
       applyTheme(initial.theme);
+
+      if (initial.projectPath) {
+        try {
+          const check = await soothe().projectCheck({ path: initial.projectPath });
+          if (!cancelled && check.initialized) {
+            setProject({ path: check.path, name: check.name, initialized: true, loading: false });
+          } else if (!cancelled) {
+            setProject({ path: null, name: '', initialized: false, loading: false });
+          }
+        } catch {
+          if (!cancelled) setProject({ path: null, name: '', initialized: false, loading: false });
+        }
+      } else {
+        if (!cancelled) setProject({ path: null, name: '', initialized: false, loading: false });
+      }
+
       const health = await soothe().daemonHealth();
       if (!cancelled) setDaemon(health);
     })();
     return () => {
       cancelled = true;
     };
-  }, [setDaemon, setSettings]);
+  }, [setDaemon, setSettings, setProject]);
 
   useEffect(() => {
     applyTheme(settings.theme);
@@ -58,9 +80,13 @@ export function App(): React.ReactElement {
       const state = useStore.getState();
       state.patchTab(status.tabId, { status: status.state, error: status.error });
     });
+    const off3 = soothe().onAutopilotEvent((envelope: AutopilotEventEnvelope) => {
+      handleAutopilotEvent(envelope);
+    });
     return () => {
       off1();
       off2();
+      off3();
     };
   }, []);
 
@@ -88,35 +114,47 @@ export function App(): React.ReactElement {
   }, [setPaletteOpen]);
 
   const daemonLive = daemon?.live ?? false;
+  const projectReady = project.path !== null && project.initialized;
 
   return (
     <div className="flex h-screen w-screen flex-col bg-background text-foreground">
       <div className="titlebar-drag h-8 flex-none border-b border-border" />
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar disabled={!daemonLive} />
-        <main className="flex flex-1 flex-col overflow-hidden">
-          {!daemonLive && tabs.length === 0 ? (
-            <EmptyState />
-          ) : (
-            <>
-              <TabBar />
-              <div className={cn('flex-1 overflow-hidden', activeTabId ? '' : 'opacity-70')}>
-                {activeTabId ? (
-                  <TabView key={activeTabId} tabId={activeTabId} />
-                ) : (
-                  <div className="flex h-full items-center justify-center text-muted-foreground">
-                    {daemonLive
-                      ? 'Open a loop from the sidebar or click "New chat".'
-                      : 'Daemon disconnected.'}
-                  </div>
-                )}
-              </div>
-            </>
-          )}
-        </main>
-      </div>
+      {project.loading ? (
+        <div className="flex flex-1 items-center justify-center text-muted-foreground">
+          Loading…
+        </div>
+      ) : !projectReady ? (
+        <ProjectScreen />
+      ) : (
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar disabled={!daemonLive} />
+          <main className="flex flex-1 flex-col overflow-hidden">
+            {activeJobId ? (
+              <DagView />
+            ) : !daemonLive && tabs.length === 0 ? (
+              <EmptyState />
+            ) : (
+              <>
+                <TabBar />
+                <div className={cn('flex-1 overflow-hidden', activeTabId ? '' : 'opacity-70')}>
+                  {activeTabId ? (
+                    <TabView key={activeTabId} tabId={activeTabId} />
+                  ) : (
+                    <div className="flex h-full items-center justify-center text-muted-foreground">
+                      {daemonLive
+                        ? 'Open a loop from the sidebar or click "New chat".'
+                        : 'Daemon disconnected.'}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </main>
+        </div>
+      )}
       <CommandPalette />
       <SettingsDialog />
+      <JobCreateDialog />
     </div>
   );
 }
@@ -145,9 +183,39 @@ function handleTabEvent(envelope: TabEventEnvelope): void {
     wireType === 'loop_new_response' ||
     wireType === 'loop_reattach_response' ||
     wireType === 'loop_detach_response' ||
+    wireType === 'skills_list_response' ||
+    wireType === 'models_list_response' ||
+    wireType === 'config_get_response' ||
+    wireType === 'daemon_status_response' ||
     wireType === 'status' ||
     wireType === 'clear'
   ) {
+    return;
+  }
+
+  // Tool call update batches — unpack individual updates and forward.
+  if (wireType === 'tool_call_updates_batch') {
+    const updates = wire.updates;
+    if (Array.isArray(updates)) {
+      for (const update of updates) {
+        if (update && typeof update === 'object') {
+          forwardInner(envelope.tabId, update as Record<string, unknown>);
+        }
+      }
+    }
+    return;
+  }
+
+  // Batch envelopes — unpack inner events and forward individually.
+  if (wireType === 'event_batch') {
+    const events = wire.events ?? wire.data;
+    if (Array.isArray(events)) {
+      for (const inner of events) {
+        if (inner && typeof inner === 'object') {
+          forwardInner(envelope.tabId, inner as Record<string, unknown>);
+        }
+      }
+    }
     return;
   }
 
@@ -188,10 +256,101 @@ function handleTabEvent(envelope: TabEventEnvelope): void {
   forwardInner(envelope.tabId, wire as Record<string, unknown>);
 }
 
+function handleAutopilotEvent(envelope: AutopilotEventEnvelope): void {
+  const state = useStore.getState();
+  const event = envelope.event as Record<string, unknown> & { type?: string };
+  const eventType = typeof event.type === 'string' ? event.type : '';
+
+  // For event envelopes, extract data
+  if (eventType === 'event') {
+    const ns = event.namespace as string | undefined;
+    const data = event.data as Record<string, unknown> | undefined;
+    if (!ns || !data) return;
+
+    if (ns === 'soothe.autopilot.goal.status') {
+      const jobId = (data.job_id ?? data.goal_id) as string | undefined;
+      if (jobId) {
+        const newStatus = data.status as string | undefined;
+        if (newStatus) state.updateJob(jobId, { status: newStatus });
+      }
+    } else if (ns === 'soothe.autopilot.goal.progress') {
+      const jobId = (data.job_id ?? data.root_id) as string | undefined;
+      if (jobId) {
+        const patch: Record<string, unknown> = {};
+        if (typeof data.completed_goals === 'number') patch.completed_goals = data.completed_goals;
+        if (typeof data.total_goals === 'number') patch.total_goals = data.total_goals;
+        if (typeof data.active_goals === 'number') patch.active_goals = data.active_goals;
+        if (typeof data.failed_goals === 'number') patch.failed_goals = data.failed_goals;
+        if (Object.keys(patch).length > 0) {
+          state.updateJob(jobId, patch as Partial<import('@shared/ipc').JobSummary>);
+        }
+      }
+    }
+  }
+}
+
+function eventFingerprint(ev: Record<string, unknown>): string {
+  const d = (ev.data ?? ev) as Record<string, unknown>;
+  const keys = Object.keys(d).filter(k => k !== 'timestamp' && k !== 'request_id').sort();
+  const vals = keys.map(k => `${k}:${JSON.stringify(d[k])}`.slice(0, 60)).join('|');
+  return `${ev.type}#${vals.slice(0, 300)}`;
+}
+
 function forwardInner(tabId: string, inner: Record<string, unknown>): void {
   const type = typeof inner.type === 'string' ? inner.type : '';
   if (!type) return;
+
+  // Unwrap `{type: "event", data: {...}}` envelope (arrives from event_batch).
+  if (type === 'event') {
+    const mode = inner.mode as string | undefined;
+    const data = inner.data;
+    if (mode === 'messages' && Array.isArray(data) && data.length > 0) {
+      forwardInner(tabId, data[0] as Record<string, unknown>);
+      return;
+    }
+    if (data && typeof data === 'object') {
+      forwardInner(tabId, data as Record<string, unknown>);
+      return;
+    }
+    return;
+  }
+
+  // Drop internal bookkeeping that should never render.
+  // Allow soothe.stream.tool_call.update through — used by step card tool rows.
+  if (
+    type === 'tool_call_updates_batch' ||
+    type === 'event_batch' ||
+    type === 'status' ||
+    type === 'clear' ||
+    type.endsWith('_response') ||
+    (type.startsWith('soothe.stream.') && type !== 'soothe.stream.tool_call.update') ||
+    type.startsWith('soothe.internal.')
+  ) {
+    return;
+  }
+
   const state = useStore.getState();
+
+  // Deduplicate: batched replays can echo events already received via streaming.
+  const tab = state.tabs.find(t => t.tabId === tabId);
+  if (tab && tab.events.length > 0) {
+    const recent = tab.events.slice(-15);
+    const innerData = (inner.data ?? inner) as Record<string, unknown>;
+    const eventId = innerData.event_id ?? innerData.step_id ?? innerData.tool_call_id;
+
+    const isDup = recent.some(e => {
+      if (e.event.type !== type) return false;
+      const d = (e.event.data ?? e.event) as Record<string, unknown>;
+      // Match by identity field if available.
+      if (eventId && typeof eventId === 'string') {
+        return (d.event_id ?? d.step_id ?? d.tool_call_id) === eventId;
+      }
+      // Fall back to shallow content comparison for events without IDs
+      // (e.g. reasoning, plan.decision, goal events).
+      return eventFingerprint(e.event) === eventFingerprint(inner);
+    });
+    if (isDup) return;
+  }
 
   // First user-side message on a generic-title tab — promote to a real title.
   if (type === 'human' || type === 'HumanMessage' || type === 'HumanMessageChunk') {
@@ -207,6 +366,17 @@ function forwardInner(tabId: string, inner: Record<string, unknown>): void {
         state.patchTab(tabId, { title: text.slice(0, 60) });
       }
     }
+  }
+
+  // Agent running state bookkeeping.
+  if (type === 'soothe.cognition.agent_loop.started') {
+    state.patchTab(tabId, { isRunning: true });
+  } else if (
+    type === 'soothe.cognition.agent_loop.completed' ||
+    type === 'soothe.cognition.agent_loop.cancelled' ||
+    type === 'soothe.cognition.agent_loop.error'
+  ) {
+    state.patchTab(tabId, { isRunning: false });
   }
 
   // Clarification lifecycle bookkeeping.

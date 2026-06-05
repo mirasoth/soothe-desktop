@@ -8,13 +8,17 @@ import {
   type TabOpenResponse,
 } from '@shared/ipc';
 import { wsManager } from '../../daemon/manager.js';
+import { getSettings } from '../../daemon/settings.js';
 
 export function registerTabHandlers(): void {
   ipcMain.handle(
     Channels.TabOpen,
     async (_evt, req: TabOpenRequest): Promise<TabOpenResponse> => {
       try {
-        const { tabId, loopId } = await wsManager.open({ loopId: req?.loopId });
+        const { tabId, loopId } = await wsManager.open({
+          loopId: req?.loopId,
+          workspacePath: getSettings().projectPath,
+        });
         return { tabId, loopId };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);

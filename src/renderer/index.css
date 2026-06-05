@@ -24,6 +24,8 @@
     --input: 240 6% 90%;
     --ring: 240 5% 65%;
     --radius: 0.5rem;
+    --user-bubble: 217 92% 55%;
+    --user-bubble-foreground: 0 0% 100%;
   }
 
   .dark {
@@ -39,6 +41,8 @@
     --muted-foreground: 240 5% 65%;
     --accent: 240 4% 16%;
     --accent-foreground: 0 0% 98%;
+    --user-bubble: 217 80% 46%;
+    --user-bubble-foreground: 0 0% 100%;
     --destructive: 0 63% 31%;
     --destructive-foreground: 0 0% 98%;
     --warning: 38 92% 50%;

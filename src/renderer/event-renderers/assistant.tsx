@@ -26,10 +26,8 @@ export function AssistantBubble({ event }: EventCardProps): React.ReactElement |
   const text = extractText(event);
   if (!text.trim()) return null;
   return (
-    <div className="flex w-full justify-start">
-      <div className="max-w-[85%] rounded-lg border bg-card px-4 py-3 shadow-sm">
-        <Markdown>{text}</Markdown>
-      </div>
+    <div className="max-w-[85%] py-1 text-sm leading-relaxed">
+      <Markdown>{text}</Markdown>
     </div>
   );
 }
@@ -51,20 +49,15 @@ export function HumanBubble({ event }: EventCardProps): React.ReactElement | nul
   return (
     <div className="flex w-full justify-end">
       <div
-        className={
-          // Right-aligned soft bubble. Uses `accent` (subtle gray) rather than
-          // `primary` (high-contrast inverse) so it sits comfortably next to the
-          // assistant card without dominating the chat. Asymmetric corners give
-          // a "your-side" cue. Width fits content up to 75% of the chat.
-          'inline-flex max-w-[75%] flex-col rounded-2xl rounded-tr-md bg-accent px-3.5 py-2 text-sm text-foreground shadow-sm'
-        }
+        className="inline-flex max-w-[75%] flex-col rounded-2xl rounded-tr-sm px-4 py-2.5 text-sm leading-relaxed text-white shadow-sm"
+        style={{ backgroundColor: 'hsl(var(--user-bubble))' }}
       >
         {rich ? (
-          <Markdown className="!prose-p:my-1 [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
+          <Markdown className="prose-invert !text-white [&_p]:my-1 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
             {text}
           </Markdown>
         ) : (
-          <span className="whitespace-pre-wrap break-words leading-snug">{text}</span>
+          <span className="whitespace-pre-wrap break-words">{text}</span>
         )}
       </div>
     </div>

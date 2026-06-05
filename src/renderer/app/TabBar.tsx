@@ -13,6 +13,9 @@ function statusGlyph(tab: TabState): React.ReactElement {
   if (tab.status === 'error') {
     return <span className="h-2 w-2 rounded-full bg-destructive" title={tab.error ?? 'error'} />;
   }
+  if (tab.isRunning) {
+    return <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" title="running" />;
+  }
   return <span className="h-2 w-2 rounded-full bg-emerald-500/70" title="ready" />;
 }
 

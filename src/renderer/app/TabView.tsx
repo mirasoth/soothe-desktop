@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useStore } from '../state/store.js';
 import { MessageList } from '../features/chat/MessageList.js';
 import { Composer } from '../features/composer/Composer.js';
@@ -29,7 +29,7 @@ export function TabView({ tabId }: Props): React.ReactElement | null {
           Connection error: {tab.error ?? 'unknown'}
         </div>
       ) : null}
-      <div className="flex-1 overflow-hidden">
+      <div className="relative flex-1 overflow-hidden">
         {tab.events.length === 0 ? (
           <div className="flex h-full items-center justify-center text-sm text-muted-foreground">
             {tab.status === 'connecting'
@@ -39,8 +39,39 @@ export function TabView({ tabId }: Props): React.ReactElement | null {
         ) : (
           <MessageList tab={tab} />
         )}
+        {tab.isRunning && <ThinkingIndicator />}
       </div>
       <Composer tab={tab} />
     </section>
+  );
+}
+
+function ThinkingIndicator(): React.ReactElement {
+  const [elapsed, setElapsed] = useState(0);
+  const startRef = useRef(Date.now());
+
+  useEffect(() => {
+    startRef.current = Date.now();
+    setElapsed(0);
+    const timer = setInterval(() => {
+      setElapsed(Math.floor((Date.now() - startRef.current) / 1000));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const label = elapsed < 60 ? `${elapsed}s` : `${Math.floor(elapsed / 60)}m ${elapsed % 60}s`;
+
+  return (
+    <div className="pointer-events-none absolute inset-x-0 bottom-2 flex justify-center">
+      <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-border bg-background/90 px-4 py-1.5 shadow-md backdrop-blur-sm">
+        <span className="relative flex h-2 w-2">
+          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex h-2 w-2 rounded-full bg-emerald-500" />
+        </span>
+        <span className="text-xs text-muted-foreground">
+          Thinking… <span className="tabular-nums">({label})</span>
+        </span>
+      </div>
+    </div>
   );
 }

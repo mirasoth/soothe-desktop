@@ -17,6 +17,8 @@
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json"
   },
   "dependencies": {
+    "@mirasoth/soothe-client": "file:../../client/typescript",
+    "@xyflow/react": "^12.11.0",
     "clsx": "^2.1.1",
     "cmdk": "^1.0.4",
     "diff": "^7.0.0",
@@ -28,7 +30,6 @@
     "react-virtuoso": "^4.12.3",
     "remark-gfm": "^4.0.0",
     "shiki": "^1.24.0",
-    "@mirasoth/soothe-client": "file:../../client/typescript",
     "tailwind-merge": "^2.5.4",
     "zustand": "^5.0.2"
   },

@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import type { WebContents } from 'electron';
 import { Client, type InputOptions } from '@mirasoth/soothe-client';
-import { Channels, type TabConnectionState, type TabEventEnvelope, type TabStatusEvent } from '@shared/ipc';
+import {
+  Channels,
+  type AutopilotEventEnvelope,
+  type TabConnectionState,
+  type TabEventEnvelope,
+  type TabStatusEvent,
+} from '@shared/ipc';
 import { getSettings } from './settings.js';
 
 const DEFAULT_VERBOSITY = 'full';
@@ -19,6 +25,7 @@ interface Tab {
 
 interface OpenOptions {
   loopId?: string;
+  workspacePath?: string;
 }
 
 interface OpenResult {
@@ -55,7 +62,7 @@ class WSManager {
 
       const supplied = opts.loopId?.trim();
       if (!supplied) {
-        loopId = await this.createNewLoop(client);
+        loopId = await this.createNewLoop(client, opts.workspacePath);
       } else {
         loopId = supplied;
         await client.sendLoopReattach(loopId);
@@ -140,10 +147,16 @@ class WSManager {
     }
   }
 
-  async listSkills(tabId: string): Promise<unknown> {
-    const tab = this.tabs.get(tabId);
-    if (!tab) throw new Error(`unknown tabId: ${tabId}`);
-    return tab.client.listSkills(15_000);
+  async listSkills(_tabId: string): Promise<unknown> {
+    const url = getSettings().daemonUrl;
+    const client = new Client(url);
+    try {
+      await client.connect();
+      await client.waitForDaemonReady(5_000);
+      return await client.listSkills(15_000);
+    } finally {
+      client.close();
+    }
   }
 
   disposeAll(): void {
@@ -158,7 +171,57 @@ class WSManager {
     this.tabs.clear();
   }
 
-  private async createNewLoop(client: Client): Promise<string> {
+  // ---------------------------------------------------------------------------
+  // Autopilot subscription (persistent connection for worker events)
+  // ---------------------------------------------------------------------------
+
+  private autopilotClient: Client | null = null;
+  private autopilotAbort: AbortController | null = null;
+
+  async autopilotSubscribe(): Promise<void> {
+    if (this.autopilotClient) return;
+    const url = getSettings().daemonUrl;
+    const client = new Client(url);
+    await client.connect();
+    await client.waitForDaemonReady(10_000);
+    await client.autopilotSubscribe(15_000);
+    this.autopilotClient = client;
+    this.autopilotAbort = new AbortController();
+    void this.consumeAutopilotEvents(client, this.autopilotAbort.signal);
+  }
+
+  async autopilotUnsubscribe(): Promise<void> {
+    if (!this.autopilotClient) return;
+    this.autopilotAbort?.abort();
+    try {
+      await this.autopilotClient.autopilotUnsubscribe(5_000).catch(() => undefined);
+    } finally {
+      this.autopilotClient.close();
+      this.autopilotClient = null;
+      this.autopilotAbort = null;
+    }
+  }
+
+  private async consumeAutopilotEvents(client: Client, signal: AbortSignal): Promise<void> {
+    try {
+      for await (const msg of client.receiveMessages(signal)) {
+        if (signal.aborted) return;
+        this.broadcastAutopilotEvent({ event: msg as Record<string, unknown> });
+      }
+    } catch {
+      // connection lost — clean up
+    }
+    this.autopilotClient = null;
+    this.autopilotAbort = null;
+  }
+
+  private broadcastAutopilotEvent(envelope: AutopilotEventEnvelope): void {
+    for (const wc of this.senders) {
+      if (!wc.isDestroyed()) wc.send(Channels.AutopilotEvent, envelope);
+    }
+  }
+
+  private async createNewLoop(client: Client, workspacePath?: string): Promise<string> {
     return new Promise<string>((resolve, reject) => {
       const timer = setTimeout(() => {
         client.removeListener('message', onMessage);
@@ -183,7 +246,8 @@ class WSManager {
       };
 
       client.on('message', onMessage);
-      client.sendLoopNew().catch((err: unknown) => {
+      const loopNewOpts = workspacePath ? { client_workspace: workspacePath } : undefined;
+      client.sendLoopNew(loopNewOpts).catch((err: unknown) => {
         clearTimeout(timer);
         client.removeListener('message', onMessage);
         reject(err instanceof Error ? err : new Error(String(err)));

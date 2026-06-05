@@ -17,6 +17,19 @@ export const Channels = {
   TabStatus: 'tab:status',
   SettingsGet: 'settings:get',
   SettingsSet: 'settings:set',
+  JobsCreate: 'jobs:create',
+  JobsStatus: 'jobs:status',
+  JobsPause: 'jobs:pause',
+  JobsResume: 'jobs:resume',
+  JobsCancel: 'jobs:cancel',
+  JobsDag: 'jobs:dag',
+  JobGuidance: 'job:guidance',
+  AutopilotSubscribe: 'autopilot:subscribe',
+  AutopilotUnsubscribe: 'autopilot:unsubscribe',
+  AutopilotEvent: 'autopilot:event',
+  SelectFolder: 'dialog:selectFolder',
+  ProjectCheck: 'project:check',
+  ProjectInit: 'project:init',
 } as const;
 
 export type ChannelName = (typeof Channels)[keyof typeof Channels];
@@ -179,6 +192,7 @@ export type ThemeMode = 'light' | 'dark' | 'system';
 export interface Settings {
   daemonUrl: string;
   theme: ThemeMode;
+  projectPath?: string;
   windowBounds?: { x?: number; y?: number; width: number; height: number };
 }
 
@@ -186,9 +200,134 @@ export type SettingsPatch = Partial<Settings>;
 
 export const DefaultSettings: Settings = {
   daemonUrl: 'ws://127.0.0.1:8765',
-  theme: 'system',
+  theme: 'light',
   windowBounds: { width: 1280, height: 800 },
 };
+
+// ---------------------------------------------------------------------------
+// Jobs (RFC-228)
+// ---------------------------------------------------------------------------
+
+export interface JobCreateRequest {
+  goal: string;
+  verificationRules?: string;
+}
+
+export interface JobCreateIpcResponse {
+  job_id: string;
+  status: string;
+  error?: string;
+}
+
+export interface JobIdRequest {
+  jobId: string;
+}
+
+export interface JobStatusIpcResponse {
+  job_id: string;
+  status: string;
+  active_goals: number;
+  completed_goals: number;
+  failed_goals: number;
+  total_goals: number;
+  workers: Array<{ goal_id: string; loop_id: string }>;
+  last_error?: string;
+  error?: string;
+}
+
+export interface JobActionIpcResponse {
+  job_id: string;
+  status: string;
+  error?: string;
+}
+
+export interface DagNodeIpc {
+  id: string;
+  description: string;
+  status: string;
+  priority: number;
+  depends_on: string[];
+  assigned_loop_id?: string;
+  steps_completed: number;
+  steps_total: number;
+  tool_calls: number;
+  summary?: string;
+  findings?: string[];
+}
+
+export interface DagEdgeIpc {
+  source: string;
+  target: string;
+}
+
+export interface JobDagIpcResponse {
+  job_id: string;
+  dag: {
+    nodes: DagNodeIpc[];
+    edges: DagEdgeIpc[];
+    root_id: string;
+  };
+  error?: string;
+}
+
+export interface JobGuidanceRequest {
+  jobId: string;
+  goalId?: string;
+  text: string;
+}
+
+export interface JobGuidanceIpcResponse {
+  job_id: string;
+  goal_id?: string;
+  absorbed: boolean;
+  error?: string;
+}
+
+export interface AutopilotSubscribeIpcResponse {
+  subscribed: boolean;
+  error?: string;
+}
+
+export interface AutopilotEventEnvelope {
+  event: Record<string, unknown>;
+}
+
+export interface JobSummary {
+  id: string;
+  goal: string;
+  status: string;
+  active_goals: number;
+  completed_goals: number;
+  failed_goals: number;
+  total_goals: number;
+  last_error?: string;
+  created_at: number;
+}
+
+// ---------------------------------------------------------------------------
+// Project (RFC-700)
+// ---------------------------------------------------------------------------
+
+export interface ProjectCheckRequest {
+  path: string;
+}
+
+export interface ProjectCheckResponse {
+  path: string;
+  initialized: boolean;
+  name: string;
+  error?: string;
+}
+
+export interface ProjectInitRequest {
+  path: string;
+}
+
+export interface ProjectInitResponse {
+  path: string;
+  name: string;
+  error?: string;
+}
 
 // ---------------------------------------------------------------------------
 // Bridge surface — what preload exposes on window.soothe.
@@ -206,6 +345,19 @@ export interface SootheBridge {
   tabClose(req: TabCloseRequest): Promise<void>;
   settingsGet(): Promise<Settings>;
   settingsSet(patch: SettingsPatch): Promise<Settings>;
+  selectFolder(): Promise<string | null>;
+  projectCheck(req: ProjectCheckRequest): Promise<ProjectCheckResponse>;
+  projectInit(req: ProjectInitRequest): Promise<ProjectInitResponse>;
+  jobCreate(req: JobCreateRequest): Promise<JobCreateIpcResponse>;
+  jobStatus(req: JobIdRequest): Promise<JobStatusIpcResponse>;
+  jobPause(req: JobIdRequest): Promise<JobActionIpcResponse>;
+  jobResume(req: JobIdRequest): Promise<JobActionIpcResponse>;
+  jobCancel(req: JobIdRequest): Promise<JobActionIpcResponse>;
+  jobDag(req: JobIdRequest): Promise<JobDagIpcResponse>;
+  jobGuidance(req: JobGuidanceRequest): Promise<JobGuidanceIpcResponse>;
+  autopilotSubscribe(): Promise<AutopilotSubscribeIpcResponse>;
+  autopilotUnsubscribe(): Promise<AutopilotSubscribeIpcResponse>;
   onTabEvent(handler: (envelope: TabEventEnvelope) => void): () => void;
   onTabStatus(handler: (status: TabStatusEvent) => void): () => void;
+  onAutopilotEvent(handler: (envelope: AutopilotEventEnvelope) => void): () => void;
 }

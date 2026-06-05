@@ -180,9 +180,20 @@ export function Composer({ tab }: Props): React.ReactElement {
             <kbd className="rounded border bg-muted px-1">Esc</kbd> cancel ·{' '}
             <kbd className="rounded border bg-muted px-1">⇧⇥</kbd> {tab.clarificationMode}
           </span>
-          <Button size="sm" onClick={send} disabled={!draft.trim() && attachments.length === 0}>
-            Send
-          </Button>
+          <div className="flex items-center gap-2">
+            {tab.isRunning && (
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={() => void soothe().tabCommand({ tabId: tab.tabId, cmd: '/cancel' })}
+              >
+                Cancel
+              </Button>
+            )}
+            <Button size="sm" onClick={send} disabled={!draft.trim() && attachments.length === 0}>
+              Send
+            </Button>
+          </div>
         </div>
       </div>
     </div>

@@ -6,6 +6,8 @@ import { registerDaemonHandlers } from './ipc/handlers/daemon.js';
 import { registerTabHandlers, disposeAllTabs } from './ipc/handlers/tab.js';
 import { registerLoopsHandlers } from './ipc/handlers/loops.js';
 import { registerSkillsHandlers } from './ipc/handlers/skills.js';
+import { registerJobsHandlers } from './ipc/handlers/jobs.js';
+import { registerProjectHandlers } from './ipc/handlers/project.js';
 
 app.setName('Soothe');
 
@@ -37,6 +39,8 @@ void app.whenReady().then(() => {
   registerTabHandlers();
   registerLoopsHandlers();
   registerSkillsHandlers();
+  registerJobsHandlers();
+  registerProjectHandlers();
 
   createMainWindow();
 

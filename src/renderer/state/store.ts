@@ -3,6 +3,7 @@ import { subscribeWithSelector } from 'zustand/middleware';
 import type {
   Attachment,
   DaemonHealthResponse,
+  JobSummary,
   LoopSummary,
   Settings,
   SkillEntry,
@@ -39,12 +40,21 @@ export interface TabState {
   clarificationMode: 'auto' | 'manual';
   /** soothe.loop.clarification.requested marks streamEndsSuppressed=true until answered */
   streamEndSuppressed: boolean;
+  isRunning: boolean;
   createdAt: number;
+}
+
+export interface ProjectState {
+  path: string | null;
+  name: string;
+  initialized: boolean;
+  loading: boolean;
 }
 
 export interface StoreState {
   daemon: DaemonHealthResponse | null;
   settings: Settings;
+  project: ProjectState;
   loops: LoopSummary[];
   loopsLoading: boolean;
   loopsError?: string;
@@ -57,12 +67,19 @@ export interface StoreState {
    */
   pendingEvents: Record<string, EventLogEntry[]>;
   activeTabId?: string;
+  jobs: JobSummary[];
+  jobsLoading: boolean;
+  jobsError?: string;
+  activeJobId?: string;
+  autopilotSubscribed: boolean;
+  jobCreateOpen: boolean;
   paletteOpen: boolean;
   settingsOpen: boolean;
 
   // mutations
   setDaemon(health: DaemonHealthResponse | null): void;
   setSettings(s: Settings): void;
+  setProject(project: ProjectState): void;
   setLoops(loops: LoopSummary[]): void;
   setLoopsError(error?: string): void;
   setLoopsLoading(loading: boolean): void;
@@ -78,6 +95,15 @@ export interface StoreState {
   setClarification(tabId: string, c: ClarificationState | undefined): void;
   toggleClarificationMode(tabId: string): void;
   setSkills(tabId: string, skills: SkillEntry[]): void;
+  setJobs(jobs: JobSummary[]): void;
+  setJobsLoading(loading: boolean): void;
+  setJobsError(error?: string): void;
+  setActiveJobId(jobId?: string): void;
+  setAutopilotSubscribed(subscribed: boolean): void;
+  setJobCreateOpen(open: boolean): void;
+  updateJob(jobId: string, patch: Partial<JobSummary>): void;
+  addJob(job: JobSummary): void;
+  removeJob(jobId: string): void;
   setPaletteOpen(open: boolean): void;
   setSettingsOpen(open: boolean): void;
 }
@@ -92,14 +118,20 @@ export const useStore = create<StoreState>()(
   subscribeWithSelector(set => ({
     daemon: null,
     settings: DefaultSettings,
+    project: { path: null, name: '', initialized: false, loading: true },
     loops: [],
     loopsLoading: false,
     tabs: [],
     pendingEvents: {},
+    jobs: [],
+    jobsLoading: false,
+    autopilotSubscribed: false,
+    jobCreateOpen: false,
     paletteOpen: false,
     settingsOpen: false,
     setDaemon: health => set({ daemon: health }),
     setSettings: settings => set({ settings }),
+    setProject: project => set({ project }),
     setLoops: loops => set({ loops, loopsError: undefined }),
     setLoopsError: error => set({ loopsError: error }),
     setLoopsLoading: loading => set({ loopsLoading: loading }),
@@ -189,6 +221,25 @@ export const useStore = create<StoreState>()(
       set(state => ({
         tabs: state.tabs.map(t => (t.tabId === tabId ? { ...t, skills } : t)),
       })),
+    setJobs: jobs => set({ jobs, jobsError: undefined }),
+    setJobsLoading: loading => set({ jobsLoading: loading }),
+    setJobsError: error => set({ jobsError: error }),
+    setActiveJobId: jobId => set({ activeJobId: jobId }),
+    setAutopilotSubscribed: subscribed => set({ autopilotSubscribed: subscribed }),
+    setJobCreateOpen: open => set({ jobCreateOpen: open }),
+    updateJob: (jobId, patch) =>
+      set(state => ({
+        jobs: state.jobs.map(j => (j.id === jobId ? { ...j, ...patch } : j)),
+      })),
+    addJob: job =>
+      set(state => ({
+        jobs: [job, ...state.jobs],
+      })),
+    removeJob: jobId =>
+      set(state => ({
+        jobs: state.jobs.filter(j => j.id !== jobId),
+        activeJobId: state.activeJobId === jobId ? undefined : state.activeJobId,
+      })),
     setPaletteOpen: open => set({ paletteOpen: open }),
     setSettingsOpen: open => set({ settingsOpen: open }),
   })),
@@ -206,6 +257,7 @@ export function makeTab(args: { tabId: string; loopId: string; title?: string })
     skills: [],
     clarificationMode: 'auto',
     streamEndSuppressed: false,
+    isRunning: false,
     createdAt: Date.now(),
   };
 }
