@@ -65,10 +65,22 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
     return loops
       .filter(loop => {
         if (tabs.some(t => t.loopId === loop.loop_id)) return true;
+        if (project.path && loop.client_workspace && loop.client_workspace !== project.path) {
+          return false;
+        }
         return loop.hasUserMessage === true;
       })
       .sort((a, b) => loopSortKey(b) - loopSortKey(a));
-  }, [loops, tabs]);
+  }, [loops, tabs, project.path]);
+
+  const visibleJobs = useMemo(() => {
+    return jobs.filter(job => {
+      if (project.path && job.workspace && job.workspace !== project.path) {
+        return false;
+      }
+      return true;
+    });
+  }, [jobs, project.path]);
 
   const doRefresh = useCallback(async (): Promise<void> => {
     if (refreshInFlightRef.current) {
@@ -405,7 +417,7 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
         {/* Jobs section */}
         <SectionHeader
           title="Jobs"
-          count={jobs.length}
+          count={visibleJobs.length}
           action={
             <button
               type="button"
@@ -418,13 +430,13 @@ export function Sidebar({ disabled }: SidebarProps): React.ReactElement {
             </button>
           }
         >
-          {jobs.length === 0 ? (
+          {visibleJobs.length === 0 ? (
             <div className="px-3 pb-2 text-xs text-muted-foreground">
               No jobs yet.
             </div>
           ) : (
             <ul className="space-y-0.5 px-1 pb-2">
-              {jobs.map(job => {
+              {visibleJobs.map(job => {
                 const isActive = activeJobId === job.id;
                 const dotColor = jobStatusColors[job.status] ?? 'bg-muted-foreground/50';
                 const progress =

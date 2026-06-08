@@ -31,8 +31,9 @@ export function registerJobsHandlers(): void {
     Channels.JobsCreate,
     async (_evt, req: JobCreateRequest): Promise<JobCreateIpcResponse> => {
       try {
+        const projectPath = getSettings().projectPath;
         const resp = await withEphemeralClient(client =>
-          client.createJob(req.goal, req.verificationRules, 15_000),
+          client.createJob(req.goal, req.verificationRules, req.workspace ?? projectPath, 15_000),
         );
         return {
           job_id: resp.job_id as string,

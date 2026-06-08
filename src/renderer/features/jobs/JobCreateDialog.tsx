@@ -8,6 +8,7 @@ export function JobCreateDialog(): React.ReactElement | null {
   const open = useStore(s => s.jobCreateOpen);
   const setOpen = useStore(s => s.setJobCreateOpen);
   const addJob = useStore(s => s.addJob);
+  const project = useStore(s => s.project);
   const autopilotSubscribed = useStore(s => s.autopilotSubscribed);
   const setAutopilotSubscribed = useStore(s => s.setAutopilotSubscribed);
 
@@ -30,6 +31,7 @@ export function JobCreateDialog(): React.ReactElement | null {
       const resp = await soothe().jobCreate({
         goal: trimmed,
         verificationRules: verificationRules.trim() || undefined,
+        workspace: project.path ?? undefined,
       });
       if (resp.error) {
         setError(resp.error);
@@ -44,6 +46,7 @@ export function JobCreateDialog(): React.ReactElement | null {
         failed_goals: 0,
         total_goals: 0,
         created_at: Date.now(),
+        workspace: project.path ?? undefined,
       });
       setGoal('');
       setVerificationRules('');

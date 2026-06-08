@@ -220,6 +220,7 @@ export const DefaultSettings: Settings = {
 export interface JobCreateRequest {
   goal: string;
   verificationRules?: string;
+  workspace?: string;
 }
 
 export interface JobCreateIpcResponse {
@@ -311,6 +312,7 @@ export interface JobSummary {
   total_goals: number;
   last_error?: string;
   created_at: number;
+  workspace?: string;
 }
 
 // ---------------------------------------------------------------------------

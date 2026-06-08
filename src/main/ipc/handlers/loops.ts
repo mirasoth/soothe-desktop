@@ -146,7 +146,8 @@ export function registerLoopsHandlers(): void {
   ipcMain.handle(Channels.LoopsList, async (): Promise<LoopsListResponse> => {
     try {
       const loops = await withEphemeralClient(async client => {
-        const resp = await client.listLoops(15_000);
+        const projectPath = getSettings().projectPath;
+        const resp = await client.listLoops(15_000, projectPath);
         const raw = (resp.loops as LoopSummary[] | undefined) ?? [];
 
         const stale: LoopSummary[] = [];
