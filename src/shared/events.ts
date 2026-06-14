@@ -50,7 +50,7 @@ export function matchesPattern(eventType: string, pattern: EventTypePattern): bo
 export const ESSENTIAL_EVENT_TYPES: readonly string[] = [
   'AIMessage',
   'AIMessageChunk',
-  'soothe.cognition.agent_loop.completed',
+  'soothe.cognition.strange_loop.completed',
   'soothe.loop.clarification.requested',
   'soothe.error.protocol',
 ];

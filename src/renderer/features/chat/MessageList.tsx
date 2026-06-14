@@ -37,13 +37,13 @@ interface StepGroupAccumulator {
 
 function isStepStartEvent(type: string): boolean {
   return (
-    type === 'soothe.cognition.agent_loop.step.started' ||
-    type === 'soothe.cognition.agent_loop.step.queued'
+    type === 'soothe.cognition.strange_loop.step.started' ||
+    type === 'soothe.cognition.strange_loop.step.queued'
   );
 }
 
 function isStepCompletedEvent(type: string): boolean {
-  return type === 'soothe.cognition.agent_loop.step.completed';
+  return type === 'soothe.cognition.strange_loop.step.completed';
 }
 
 function isToolExecutionEvent(type: string): boolean {
@@ -239,7 +239,7 @@ function coalesceEvents(tab: TabState): Item[] {
     }
 
     // --- Goal completion: inject total duration ---
-    if (type === 'soothe.cognition.agent_loop.completed') {
+    if (type === 'soothe.cognition.strange_loop.completed') {
       flushAssistant();
       flushStepGroup();
       const firstEvent = tab.events[0];

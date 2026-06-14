@@ -28,24 +28,24 @@ export function registerAllRenderers(): void {
   registerRenderer('ToolMessage', ToolMessageCard);
 
   // Goal started
-  registerRenderer('soothe.cognition.agent_loop.started', GoalCard);
+  registerRenderer('soothe.cognition.strange_loop.started', GoalCard);
 
   // Final reports / completion
-  registerRenderer('soothe.cognition.agent_loop.completed', FinalReportCard);
-  registerRenderer('soothe.cognition.agentic.step.completed', FinalReportCard);
+  registerRenderer('soothe.cognition.strange_loop.completed', FinalReportCard);
+  registerRenderer('soothe.cognition.strange_loop.step.completed', FinalReportCard);
 
   // Step events — normally consumed by step-group coalescing in MessageList,
   // registered here as fallback for events that appear outside step groups.
-  registerRenderer('soothe.cognition.agent_loop.step.started', ReasoningCard);
-  registerRenderer('soothe.cognition.agent_loop.step.queued', ReasoningCard);
-  registerRenderer('soothe.cognition.agent_loop.step.completed', FinalReportCard);
+  registerRenderer('soothe.cognition.strange_loop.step.started', ReasoningCard);
+  registerRenderer('soothe.cognition.strange_loop.step.queued', ReasoningCard);
+  registerRenderer('soothe.cognition.strange_loop.step.completed', FinalReportCard);
 
   // Plan decision — structured tree view
-  registerRenderer('soothe.cognition.agent_loop.plan.decision', PlanDecisionCard);
+  registerRenderer('soothe.cognition.strange_loop.plan.decision', PlanDecisionCard);
 
   // Reasoning / plan
-  registerRenderer('soothe.cognition.agent_loop.*', ReasoningCard);
-  registerRenderer('soothe.cognition.agent_loop.*.*', ReasoningCard);
+  registerRenderer('soothe.cognition.strange_loop.*', ReasoningCard);
+  registerRenderer('soothe.cognition.strange_loop.*.*', ReasoningCard);
   registerRenderer('soothe.cognition.plan.*', ReasoningCard);
   registerRenderer('soothe.cognition.plan.*.*', ReasoningCard);
 

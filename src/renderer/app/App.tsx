@@ -373,14 +373,14 @@ function forwardInner(tabId: string, inner: Record<string, unknown>): void {
   }
 
   // Agent running state bookkeeping.
-  if (type === 'soothe.cognition.agent_loop.started') {
+  if (type === 'soothe.cognition.strange_loop.started') {
     state.patchTab(tabId, { isRunning: true });
     const tab = state.tabs.find(t => t.tabId === tabId);
     if (tab) state.patchLoop(tab.loopId, { status: 'running' });
   } else if (
-    type === 'soothe.cognition.agent_loop.completed' ||
-    type === 'soothe.cognition.agent_loop.cancelled' ||
-    type === 'soothe.cognition.agent_loop.error'
+    type === 'soothe.cognition.strange_loop.completed' ||
+    type === 'soothe.cognition.strange_loop.cancelled' ||
+    type === 'soothe.cognition.strange_loop.error'
   ) {
     state.patchTab(tabId, { isRunning: false });
     const tab = state.tabs.find(t => t.tabId === tabId);
