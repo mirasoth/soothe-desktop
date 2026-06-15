@@ -18,15 +18,20 @@ function extractQuestions(event: Record<string, unknown>): string[] {
   return ['Please clarify'];
 }
 
-export function ClarificationCard({ event, tabId }: EventCardProps): React.ReactElement {
+export function ClarificationCard({ event, tabId }: EventCardProps): React.ReactElement | null {
   const type = event.type;
   const tab = useStore(s => s.tabs.find(t => t.tabId === tabId));
   const setClarification = useStore(s => s.setClarification);
   const questions = extractQuestions(event);
+  const data = (event.data ?? event) as Record<string, unknown>;
 
   const isRequest = type === 'soothe.loop.clarification.requested';
   const isAnswered = type === 'soothe.loop.clarification.answered';
   const isDeferred = type === 'soothe.loop.clarification.deferred';
+  const mode =
+    (typeof data.mode === 'string' ? data.mode : undefined) ??
+    tab?.clarification?.mode ??
+    tab?.clarificationMode;
 
   const [answers, setAnswers] = useState<string[]>(() => questions.map(() => ''));
   const [submitting, setSubmitting] = useState(false);
@@ -34,8 +39,13 @@ export function ClarificationCard({ event, tabId }: EventCardProps): React.React
   // If the tab-level clarification has resolved, lock the card.
   const locked = !isRequest || tab?.clarification?.status !== 'pending';
 
+  // Auto-mode clarifications are resolved by policy/defer logic and should not
+  // present interactive "Awaiting your answer" UI cards in the chat stream.
+  if (isRequest && mode === 'auto') {
+    return null;
+  }
+
   if (isAnswered || isDeferred) {
-    const data = (event.data ?? event) as Record<string, unknown>;
     const source = (data.source as string | undefined) ?? (isDeferred ? 'deferred' : 'human');
     return (
       <Card className="border-emerald-500/40 bg-emerald-500/5">
