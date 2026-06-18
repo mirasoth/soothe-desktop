@@ -8,13 +8,13 @@ export async function probeDaemon(): Promise<DaemonHealthResponse> {
   try {
     await client.connect();
     const status = (await checkDaemonStatus(client, 3_000)) as Record<string, unknown>;
-    // daemon_status_response carries: running, port_live, active_threads, daemon_pid
+    // daemon_status_response carries: running, port_live, active_threads, daemon_pid, daemon_version, core_version
     const running = Boolean(status?.running);
     if (running) {
       return {
         live: true,
         url: daemonUrl,
-        version: (status?.version as string | undefined) ?? undefined,
+        version: (status?.daemon_version as string | undefined) ?? undefined,
       };
     }
     return { live: false, url: daemonUrl, error: 'daemon reports running=false' };
