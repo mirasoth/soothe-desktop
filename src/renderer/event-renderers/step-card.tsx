@@ -315,7 +315,7 @@ export function StepCard({
         )}
         {!completionEvent && toolRows.length > 0 && (
           <span className="flex-none text-[11px] text-muted-foreground">
-            {toolRows.length} tool{toolRows.length !== 1 ? 's' : ''}
+            {toolStatsSuffix(toolRows)}
           </span>
         )}
         <span className="text-[10px] text-muted-foreground">
